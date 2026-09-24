@@ -1,0 +1,17 @@
+{
+  "name": "3ukph-messenger-bot",
+  "version": "1.0.0",
+  "description": "AI-powered Messenger auto-reply bot for the 3UK Philippines eSIM Facebook page.",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "dotenv": "^16.4.5"
+  }
+}
