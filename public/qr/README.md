@@ -1,6 +1,7 @@
-Put the payment QR code images here, named exactly:
+Payment QR code images the bot sends when a customer orders:
 
-  gcash.png  maya.png  maribank.png  unionbank.png  bpi.png
+  gcash.png  maribank.jpg  unionbank.jpg   (all InstaPay QRs)
 
-(.jpg is fine too). The bot sends the matching one when a customer places an order.
-If a file is missing, the bot tells the customer an admin will send the QR, and alerts you.
+Maya and BPI customers get an InstaPay QR (GCash for Maya, UnionBank for BPI)
+and scan it from their own app. To use a dedicated QR instead, add maya.png or
+bpi.png here -- the bot picks it up automatically.

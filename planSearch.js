@@ -12,7 +12,7 @@
 const fs = require("fs");
 const path = require("path");
 
-const USD_TO_PHP = 62; // fixed exchange rate: 1 USD = 62 PHP
+const USD_TO_PHP = 63; // fixed exchange rate: 1 USD = 63 PHP
 
 const RAW_PLANS = JSON.parse(fs.readFileSync(path.join(__dirname, "data", "plans.json"), "utf8"));
 const DESTINATIONS = JSON.parse(fs.readFileSync(path.join(__dirname, "data", "destinations.json"), "utf8"));

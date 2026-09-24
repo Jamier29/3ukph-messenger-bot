@@ -66,6 +66,15 @@ function findQrFile(methodKey) {
   return null;
 }
 
+// Which QR to send when a method has no QR of its own (e-wallet -> e-wallet QR, bank -> bank QR first).
+const INSTAPAY_FALLBACK = {
+  maya: ["gcash", "maribank", "unionbank"],
+  gcash: ["maribank", "unionbank"],
+  bpi: ["unionbank", "maribank", "gcash"],
+  unionbank: ["maribank", "gcash"],
+  maribank: ["unionbank", "gcash"]
+};
+
 function normalizePaymentMethod(input) {
   const s = String(input || "").toLowerCase().replace(/[^a-z]/g, "");
   if (s.includes("gcash")) return "gcash";
@@ -162,7 +171,16 @@ async function runTool(name, input, senderId) {
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { error: "That email looks invalid. Ask the customer to re-type it." };
 
       const methodName = PAYMENT_METHODS[methodKey];
-      const qrFile = findQrFile(methodKey);
+      // All our QR codes are InstaPay QRs, which any Philippine bank or e-wallet app can scan.
+      // If there's no QR for the chosen method (e.g. Maya, BPI), send an InstaPay QR they can scan from that app.
+      let qrFile = findQrFile(methodKey);
+      let viaInstaPay = false;
+      if (!qrFile) {
+        for (const alt of INSTAPAY_FALLBACK[methodKey] || []) {
+          qrFile = findQrFile(alt);
+          if (qrFile) { viaInstaPay = true; break; }
+        }
+      }
       let qrSent = false;
       if (qrFile && PUBLIC_URL) {
         qrSent = await sendImage(senderId, `${PUBLIC_URL}/qr/${qrFile}`);
@@ -190,7 +208,9 @@ async function runTool(name, input, senderId) {
         paymentMethod: methodName,
         paymentQrSentToCustomer: qrSent,
         instructionsForYou: qrSent
-          ? `The ${methodName} payment QR image was just sent to the customer. Tell them to pay exactly ${plan.price} using it and send a screenshot of the payment here. Their eSIM QR code arrives within 5 minutes after the payment is confirmed.`
+          ? (viaInstaPay
+              ? `An InstaPay payment QR image was just sent to the customer. Tell them to open their ${methodName} app, choose InstaPay / Scan QR, scan that QR, and pay exactly ${plan.price} (small InstaPay transfer fees may apply), then send a screenshot of the payment here. Their eSIM QR code arrives within 5 minutes after the payment is confirmed.`
+              : `The ${methodName} payment QR image was just sent to the customer. Tell them to pay exactly ${plan.price} using it and send a screenshot of the payment here. Their eSIM QR code arrives within 5 minutes after the payment is confirmed.`)
           : `The payment QR could not be sent automatically. Tell the customer the order is noted and an admin will send the ${methodName} payment QR here shortly. Amount to pay: ${plan.price}.`
       };
     }
