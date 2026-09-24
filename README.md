@@ -1,5 +1,35 @@
 # 3UKPH Messenger Bot — Setup Guide
 
+## Update (Sept 2026): pesos, ordering, payment QR codes, admin alerts
+
+- Prices are quoted in pesos at a fixed 1 USD = ₱62, exact amounts (no rounding).
+  To change the rate, edit `USD_TO_PHP` at the top of `planSearch.js`.
+- Ordering: the bot confirms the exact plan and price, asks for the payment method
+  (GCash, Maya, MariBank, UnionBank, BPI) and the customer's email, then sends the
+  matching payment QR code and alerts you.
+- Payment QR codes: put the images in `public/qr/` named `gcash.png`, `maya.png`,
+  `maribank.png`, `unionbank.png`, `bpi.png`. If one is missing, the bot tells the
+  customer an admin will send it, and your alert says so.
+- Payment screenshots: when a customer sends an image, the bot thanks them and alerts you.
+- Hand-off to a human: if a customer asks for an admin (or has a complaint, refund,
+  payment problem or reseller question), you get an alert and the bot goes quiet in
+  that chat for 12 hours (`BOT_PAUSE_HOURS`). The bot also goes quiet in a chat as soon
+  as you type a reply yourself from the page inbox.
+
+### Admin alerts with sound (ntfy — free, no account needed)
+1. Install the **ntfy** app on your phone (App Store / Google Play).
+2. Tap **+** and subscribe to a topic name only you know, e.g. `3ukph-orders-8x2k91`
+   (anyone who knows the name can read the alerts, so make it hard to guess).
+3. In Render → your service → **Environment**, add `ADMIN_NTFY_TOPIC` = that same name.
+4. Alerts are sent with high priority, so they play a sound.
+
+### Let the bot notice when you reply yourself
+In the Meta developer dashboard → Messenger API Settings, subscribe to the
+`message_echoes` webhook field (in both the Webhook fields list and the page's
+**Add Subscriptions**), next to `messages` and `messaging_postbacks`.
+
+---
+
 This connects your 3UK Philippines Facebook Page to an AI assistant that
 replies to customer messages automatically, using Claude for
 context-aware answers — including real, current pricing looked up from
