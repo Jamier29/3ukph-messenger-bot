@@ -68,6 +68,7 @@ reseller terms. Collect their name and what they're interested in, then call han
 - Payment problems or confirming that a payment was received
 - Refunds, complaints, or problems with an eSIM they already bought
 - Reseller or bulk inquiries
+- The customer asks us to delete their data ("delete my data") -- confirm we will delete it within 30 days
 - Anything you're not sure about -- it's better to hand off than to guess
 After calling handoff_to_human, tell the customer an admin has been notified and will reply here soon.
 

@@ -49,6 +49,9 @@ console.log(`[startup] Loaded pricing catalog covering ${listAllDestinations().l
 // ---------------------------------------------------------------------
 app.use("/qr", express.static(path.join(__dirname, "public", "qr")));
 
+// Privacy policy page (required by Meta for app review): <PUBLIC_URL>/privacy
+app.get("/privacy", (req, res) => res.sendFile(path.join(__dirname, "public", "privacy.html")));
+
 const PAYMENT_METHODS = {
   gcash: "GCash",
   maya: "Maya",
