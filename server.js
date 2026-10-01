@@ -287,7 +287,26 @@ function rememberSentId(mid) {
 // ---------------------------------------------------------------------
 // Health check.
 // ---------------------------------------------------------------------
-app.get("/", (req, res) => {
+// Business website homepage (3ukph.com)
+app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public", "index.html")));
+app.get("/logo.png", (req, res) => res.sendFile(path.join(__dirname, "public", "logo.png")));
+app.get("/favicon.png", (req, res) => res.sendFile(path.join(__dirname, "public", "favicon.png")));
+// Public plan-finder API used by the website (peso prices only, no cost data)
+app.get("/api/destinations", (req, res) => res.json(listAllDestinations()));
+app.get("/api/plans", (req, res) => {
+  const num = (v) => (v === undefined || v === "" ? undefined : Number(v));
+  const result = searchPlans({
+    destination: String(req.query.destination || "").slice(0, 60),
+    minDataGB: num(req.query.minDataGB),
+    minDays: num(req.query.minDays),
+    maxDays: num(req.query.maxDays),
+    needsCallsAndTexts: req.query.calls === "1" ? true : undefined,
+    maxResults: 200
+  });
+  res.json(result);
+});
+// Health check for uptime monitoring
+app.get("/health", (req, res) => {
   res.send(`3UKPH Messenger bot is running. Catalog: ${listAllDestinations().length} destinations loaded.`);
 });
 

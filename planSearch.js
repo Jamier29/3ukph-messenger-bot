@@ -112,7 +112,7 @@ function describePlan(p) {
  * narrowed by data amount, validity and whether calls/texts are needed.
  */
 function searchPlans({ destination, minDataGB, minDays, maxDays, needsCallsAndTexts, maxResults } = {}) {
-  const limit = Math.min(Math.max(maxResults || 25, 1), 40);
+  const limit = Math.min(Math.max(maxResults || 25, 1), 200);
   const resolvedNames = resolveDestination(destination);
 
   if (resolvedNames.length === 0) {
