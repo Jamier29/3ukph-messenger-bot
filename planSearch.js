@@ -207,4 +207,41 @@ function headlinePrices(destination) {
   };
 }
 
-module.exports = { searchPlans, getPlan, listAllDestinations, getRate, getCatalogInfo, headlinePrices, setCatalog, formatPHP, toPHP };
+
+// Regional and global plan groups for the website's route map: the cheapest
+// "from" price, the headline plans and the exact list of countries covered.
+// Europe comes in two coverage versions (e.g. 37 and 46 countries), Global
+// in "Lite" and "Max", so each version is its own group.
+function regionSummaries() {
+  const groups = new Map();
+  PLANS.forEach((p) => {
+    if (p.scope === "country" || p.voiceSms || !(p.retailPrice > 0) || !Array.isArray(p.countries)) return;
+    let key;
+    if (p.scope === "global") key = /max/i.test(p.name) ? "Global Max" : /lite/i.test(p.name) ? "Global Lite" : "Global";
+    else key = p.destination + " " + p.countries.length;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(p);
+  });
+  // Regions with a single coverage version also get their plain name ("Asia").
+  const perDest = {};
+  groups.forEach((list, key) => { if (list[0].scope === "regional") (perDest[list[0].destination] = perDest[list[0].destination] || []).push(key); });
+  const out = {};
+  groups.forEach((list, key) => {
+    if (list.length < 5) return; // odd one-off packages are not a plan family
+    const pick = (fn) => { const p = cheapest(list.filter(fn)); return p ? toPHP(p.retailPrice) : null; };
+    const isPlus = (p) => /plus|premium/i.test(p.name);
+    const summary = {
+      from: pick(() => true),
+      p5: pick((p) => !p.unlimited && dataToNumber(p.data) === 5 && p.validityDays === 30),
+      p10: pick((p) => !p.unlimited && dataToNumber(p.data) === 10 && p.validityDays === 30),
+      u7: pick((p) => p.unlimited && !isPlus(p) && p.validityDays === 7),
+      cov: [...new Set(list[0].countries)].sort((a, b) => a.localeCompare(b))
+    };
+    out[key] = summary;
+    const d = list[0].destination;
+    if (list[0].scope === "regional" && perDest[d].filter((k) => groups.get(k).length >= 5).length === 1) out[d] = summary;
+  });
+  return out;
+}
+
+module.exports = { regionSummaries, searchPlans, getPlan, listAllDestinations, getRate, getCatalogInfo, headlinePrices, setCatalog, formatPHP, toPHP };

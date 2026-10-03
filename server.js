@@ -12,7 +12,7 @@ const fs = require("fs");
 const path = require("path");
 const express = require("express");
 const { BUSINESS_INFO } = require("./business-info");
-const { searchPlans, getPlan, listAllDestinations, getRate, headlinePrices } = require("./planSearch");
+const { searchPlans, getPlan, listAllDestinations, getRate, headlinePrices, regionSummaries } = require("./planSearch");
 const { startPriceSync, syncPrices, getSyncStatus } = require("./priceSync");
 const crypto = require("crypto");
 
@@ -314,6 +314,11 @@ app.get("/api/popular", (req, res) => {
   list.forEach((d) => { const h = headlinePrices(d.slice(0, 60)); if (h) out[d] = h; });
   res.set("Cache-Control", "public, max-age=300");
   res.json(out);
+});
+// Regional / global plan groups with coverage, for the route map
+app.get("/api/regions", (req, res) => {
+  res.set("Cache-Control", "public, max-age=300");
+  res.json(regionSummaries());
 });
 // When were prices last updated? (no secrets here)
 app.get("/api/price-status", (req, res) => {
