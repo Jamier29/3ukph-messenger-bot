@@ -12,18 +12,32 @@
 const fs = require("fs");
 const path = require("path");
 
-const USD_TO_PHP = 63; // fixed exchange rate: 1 USD = 63 PHP
+let USD_TO_PHP = 65; // fixed exchange rate: 1 USD = 65 PHP (can be updated from the price sheet's "Settings" tab)
 
-const RAW_PLANS = JSON.parse(fs.readFileSync(path.join(__dirname, "data", "plans.json"), "utf8"));
-const DESTINATIONS = JSON.parse(fs.readFileSync(path.join(__dirname, "data", "destinations.json"), "utf8"));
-const DESTINATIONS_LOWER = DESTINATIONS.map((d) => d.toLowerCase());
+// The catalog starts from data/plans.json (built in to the code) and is
+// replaced automatically whenever priceSync.js loads a newer price sheet.
+let PLANS = [];
+let PLANS_BY_ID = new Map();
+let DESTINATIONS = [];
+let DESTINATIONS_LOWER = [];
+let CATALOG_INFO = { source: "built-in file (data/plans.json)", updatedAt: null, planCount: 0 };
 
-// Give every plan a stable ID (its position in plans.json) so the bot can
+// Give every plan a stable ID (its position in the catalog) so the bot can
 // refer to ONE exact plan. Several plans share the same name (e.g. two
 // different "50GB eSIM Data for 30 Days in Europe" with different prices
 // and coverage), which is what caused mixed-up prices before.
-const PLANS = RAW_PLANS.map((p, i) => ({ ...p, planId: "P" + (i + 1) }));
-const PLANS_BY_ID = new Map(PLANS.map((p) => [p.planId, p]));
+function setCatalog(rawPlans, { rate, source, updatedAt } = {}) {
+  PLANS = rawPlans.map((p, i) => ({ ...p, planId: "P" + (i + 1) }));
+  PLANS_BY_ID = new Map(PLANS.map((p) => [p.planId, p]));
+  DESTINATIONS = [...new Set(PLANS.map((p) => p.destination))].sort((a, b) => a.localeCompare(b));
+  DESTINATIONS_LOWER = DESTINATIONS.map((d) => d.toLowerCase());
+  if (typeof rate === "number" && rate > 0) USD_TO_PHP = rate;
+  CATALOG_INFO = { source: source || CATALOG_INFO.source, updatedAt: updatedAt || new Date().toISOString(), planCount: PLANS.length };
+}
+
+setCatalog(JSON.parse(fs.readFileSync(path.join(__dirname, "data", "plans.json"), "utf8")), {
+  source: "built-in file (data/plans.json)"
+});
 
 // Common alternate names customers might type. Add more here any time you
 // notice the bot missing a match in real conversations.
@@ -102,7 +116,10 @@ function describePlan(p) {
     price: formatPHP(toPHP(p.retailPrice)),
     pricePHP: toPHP(p.retailPrice)
   };
-  if (networks.length > 0 && networks.length <= 3) out.networks = networks.join(", ");
+  if (Array.isArray(p.countries) && p.scope !== "country") {
+    out.coverage = `${p.countries.length} countries`;
+    out.countriesCovered = p.countries;
+  } else if (networks.length > 0 && networks.length <= 3) out.networks = networks.join(", ");
   else if (networks.length > 3) out.coverage = `${networks.length} partner networks`;
   return out;
 }
@@ -159,4 +176,35 @@ function listAllDestinations() {
   return DESTINATIONS;
 }
 
-module.exports = { searchPlans, getPlan, listAllDestinations, USD_TO_PHP, formatPHP };
+function getRate() {
+  return USD_TO_PHP;
+}
+
+function getCatalogInfo() {
+  return { ...CATALOG_INFO, rate: USD_TO_PHP, destinations: DESTINATIONS.length };
+}
+
+// Headline prices for the website's destination cards: the "from" price and
+// the cheapest 5GB/30-day, 10GB/30-day and Unlimited/7-day data plans.
+function cheapest(list) {
+  return list.length ? list.reduce((a, b) => (b.retailPrice < a.retailPrice ? b : a)) : null;
+}
+function headlinePrices(destination) {
+  const d = String(destination || "").toLowerCase();
+  const all = PLANS.filter((p) => p.destination.toLowerCase() === d && !p.voiceSms && p.retailPrice > 0);
+  if (!all.length) return null;
+  const pick = (fn) => {
+    const p = cheapest(all.filter(fn));
+    return p ? { pricePHP: toPHP(p.retailPrice), price: formatPHP(toPHP(p.retailPrice)), countries: p.countries ? p.countries.length : undefined } : null;
+  };
+  const isPlus = (p) => /plus|premium/i.test(p.name);
+  return {
+    destination: all[0].destination,
+    from: pick(() => true),
+    gb5days30: pick((p) => !p.unlimited && dataToNumber(p.data) === 5 && p.validityDays === 30),
+    gb10days30: pick((p) => !p.unlimited && dataToNumber(p.data) === 10 && p.validityDays === 30),
+    unlimitedDays7: pick((p) => p.unlimited && !isPlus(p) && p.validityDays === 7)
+  };
+}
+
+module.exports = { searchPlans, getPlan, listAllDestinations, getRate, getCatalogInfo, headlinePrices, setCatalog, formatPHP, toPHP };

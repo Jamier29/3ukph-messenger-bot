@@ -12,7 +12,9 @@ const fs = require("fs");
 const path = require("path");
 const express = require("express");
 const { BUSINESS_INFO } = require("./business-info");
-const { searchPlans, getPlan, listAllDestinations, USD_TO_PHP } = require("./planSearch");
+const { searchPlans, getPlan, listAllDestinations, getRate, headlinePrices } = require("./planSearch");
+const { startPriceSync, syncPrices, getSyncStatus } = require("./priceSync");
+const crypto = require("crypto");
 
 const app = express();
 app.use(express.json());
@@ -40,7 +42,7 @@ if (!ADMIN_NTFY_TOPIC) {
   console.warn("[startup] ADMIN_NTFY_TOPIC not set -- admin phone alerts are OFF (alerts will only appear in the Render logs).");
 }
 
-console.log(`[startup] Loaded pricing catalog covering ${listAllDestinations().length} destinations. Rate: 1 USD = ${USD_TO_PHP} PHP.`);
+console.log(`[startup] Loaded pricing catalog covering ${listAllDestinations().length} destinations. Rate: 1 USD = ${getRate()} PHP.`);
 
 // ---------------------------------------------------------------------
 // Payment QR codes. Put the image files in public/qr/ named after the
@@ -304,6 +306,29 @@ app.get("/api/plans", (req, res) => {
     maxResults: 200
   });
   res.json(result);
+});
+// Headline prices for the website's destination cards (always the latest prices)
+app.get("/api/popular", (req, res) => {
+  const list = String(req.query.dest || "").split(",").map((d) => d.trim()).filter(Boolean).slice(0, 30);
+  const out = {};
+  list.forEach((d) => { const h = headlinePrices(d.slice(0, 60)); if (h) out[d] = h; });
+  res.set("Cache-Control", "public, max-age=300");
+  res.json(out);
+});
+// When were prices last updated? (no secrets here)
+app.get("/api/price-status", (req, res) => {
+  const s = getSyncStatus();
+  res.json({ autoUpdate: s.autoUpdate, lastCheck: s.at, ok: s.ok, message: s.message, plans: s.catalog.planCount, rate: s.catalog.rate, pricesUpdatedAt: s.catalog.updatedAt });
+});
+// Update prices right now instead of waiting for the next automatic check.
+// Open https://3ukph.com/admin/refresh-prices?key=YOUR_ADMIN_KEY in a browser.
+app.get("/admin/refresh-prices", async (req, res) => {
+  const want = process.env.ADMIN_KEY || "";
+  const got = String(req.query.key || "");
+  const okKey = want.length >= 12 && got.length === want.length && crypto.timingSafeEqual(Buffer.from(got), Buffer.from(want));
+  if (!okKey) return res.status(403).send("Wrong or missing key.");
+  const r = await syncPrices("manual refresh");
+  res.type("text/plain").send((r.ok ? "Prices updated. " : "Prices NOT updated. ") + r.message);
 });
 // Health check for uptime monitoring
 app.get("/health", (req, res) => {
@@ -592,6 +617,8 @@ async function sendTyping(recipientId) {
     });
   } catch (_) { /* not important */ }
 }
+
+startPriceSync();
 
 app.listen(PORT, () => {
   console.log(`3UKPH Messenger bot listening on port ${PORT}`);

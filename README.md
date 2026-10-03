@@ -138,7 +138,26 @@ questions to see how it handles them.
 Whenever your policies change, edit `business-info.js`, then redeploy
 (push the change to your GitHub repo — Render redeploys automatically).
 
-**When your pricing spreadsheet updates:** send me the new version and
-I'll regenerate `data/plans.json` from it — the bot will then be
-quoting the new prices as soon as you redeploy. No other code changes
-needed either way.
+**Prices update automatically from your Google Sheet.** The website and
+the bot read your price list from Google Sheets (see `priceSync.js`):
+
+1. Keep the price list in Google Sheets with the same tabs and column
+   names (Destination, Name, Package Type, Data, Validity, Retail Price,
+   Supported Countries). Extra columns like "PHP Price" are fine.
+2. In Google Sheets: File > Share > Publish to web > Entire document >
+   Microsoft Excel (.xlsx) > Publish. Copy the link.
+3. In Render > Environment, add:
+   - `PRICE_SHEET_URL` = that link
+   - `ADMIN_KEY` = a long password you make up (12+ characters)
+   - optional `PRICE_SYNC_MINUTES` (default 30)
+4. Edit prices in the sheet. Within 30 minutes the website and bot use
+   them. To update immediately, open
+   `https://3ukph.com/admin/refresh-prices?key=YOUR_ADMIN_KEY`.
+
+The peso rate is read from a "Settings" tab (the first number between
+40 and 100), otherwise 65 is used. If the sheet can't be read or looks
+wrong, the last good prices stay; check `https://3ukph.com/api/price-status`.
+`data/plans.json` is only the backup used before the first sync.
+
+Never put your supplier cost in the published sheet: anyone with the
+link can download it.
