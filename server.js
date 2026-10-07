@@ -95,11 +95,12 @@ function normalizePaymentMethod(input) {
 // ---------------------------------------------------------------------
 // ---------------------------------------------------------------------
 // Discount codes. Default: SALAMAT10 = 10% off (thank-you code for past
-// customers). To change them without editing code, set DISCOUNT_CODES in
+// customers) and WELCOME10 = 10% off a new customer's first order (shown on
+// 3ukph.com). To change them without editing code, set DISCOUNT_CODES in
 // Render, e.g.  SALAMAT10:10,BAYANIHAN5:5   (set it to "none" to turn all off).
 // ---------------------------------------------------------------------
 const DISCOUNT_CODES = (() => {
-  const raw = (process.env.DISCOUNT_CODES || "SALAMAT10:10").trim();
+  const raw = (process.env.DISCOUNT_CODES || "SALAMAT10:10,WELCOME10:10").trim();
   const codes = {};
   if (raw.toLowerCase() === "none") return codes;
   for (const part of raw.split(",")) {
@@ -127,6 +128,58 @@ function applyDiscount(plan, code) {
     price: formatPHP(discounted),
     pricePHP: discounted
   };
+}
+
+// ---------------------------------------------------------------------
+// One discount per customer, ever (any code). Used discounts are saved in a
+// free Upstash Redis database so they survive restarts and redeploys.
+// Render settings: UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN.
+// Without them, used discounts are only remembered until the next restart.
+// To let a customer use a discount again, delete their "discount:used:..."
+// key in Upstash (Data Browser).
+// ---------------------------------------------------------------------
+const UPSTASH_URL = (process.env.UPSTASH_REDIS_REST_URL || "").replace(/\/$/, "");
+const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || "";
+const usedDiscountsMemory = new Map(); // fallback only
+if (!UPSTASH_URL || !UPSTASH_TOKEN) {
+  console.warn("[startup] UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN not set -- used discount codes are only remembered until the server restarts.");
+}
+
+async function redis(command) {
+  const res = await fetch(UPSTASH_URL, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${UPSTASH_TOKEN}`, "Content-Type": "application/json" },
+    body: JSON.stringify(command)
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data.error) throw new Error(data.error || `Upstash HTTP ${res.status}`);
+  return data.result;
+}
+
+// Returns { code, at } if this customer already used a discount, else null.
+// Throws if the database can't be reached.
+async function getUsedDiscount(senderId) {
+  if (!UPSTASH_URL || !UPSTASH_TOKEN) return usedDiscountsMemory.get(senderId) || null;
+  const v = await redis(["GET", `discount:used:${senderId}`]);
+  try { return v ? JSON.parse(v) : null; } catch { return { code: String(v) }; }
+}
+
+// Atomically records the discount. Returns true if recorded, false if the
+// customer had already used one. Throws if the database can't be reached.
+async function claimDiscount(senderId, record) {
+  if (!UPSTASH_URL || !UPSTASH_TOKEN) {
+    if (usedDiscountsMemory.has(senderId)) return false;
+    usedDiscountsMemory.set(senderId, record);
+    return true;
+  }
+  const r = await redis(["SET", `discount:used:${senderId}`, JSON.stringify(record), "NX"]);
+  return r === "OK";
+}
+
+function alreadyUsedMessage(used) {
+  const when = used && used.at ? ` on ${new Date(used.at).toLocaleDateString("en-PH", { timeZone: "Asia/Manila", year: "numeric", month: "short", day: "numeric" })}` : "";
+  return `This customer already used a discount${used && used.code ? ` (${used.code})` : ""}${when}. ` +
+    "Only one discount per customer, and codes can't be combined. Kindly explain this and quote the regular price.";
 }
 
 const TOOLS = [
@@ -204,16 +257,44 @@ async function runTool(name, input, senderId) {
 
     case "get_plan": {
       const plan = getPlan(input.planId);
-      return plan ? applyDiscount(plan, input.discountCode) : { error: "No plan with that planId. Search again." };
+      if (!plan) return { error: "No plan with that planId. Search again." };
+      if (input.discountCode) {
+        try {
+          const used = await getUsedDiscount(senderId);
+          if (used) return { ...plan, discountError: alreadyUsedMessage(used) };
+        } catch (err) {
+          console.error("[discount] could not check used discounts:", err.message);
+        }
+      }
+      return applyDiscount(plan, input.discountCode);
     }
 
     case "create_order": {
-      const plan = applyDiscount(getPlan(input.planId), input.discountCode);
-      if (!plan) return { error: "No plan with that planId. Search again and confirm the plan with the customer." };
+      const basePlan = getPlan(input.planId);
+      if (!basePlan) return { error: "No plan with that planId. Search again and confirm the plan with the customer." };
       const methodKey = normalizePaymentMethod(input.paymentMethod);
       if (!methodKey) return { error: "Unknown payment method. Accepted: GCash, Maya, MariBank, UnionBank, BPI." };
       const email = String(input.email || "").trim();
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { error: "That email looks invalid. Ask the customer to re-type it." };
+
+      // Discount: only one per customer, ever. Record it now (atomically) so it can't be used twice.
+      let plan = applyDiscount(basePlan, input.discountCode);
+      let discountNote = "";
+      if (plan.discountCode) {
+        try {
+          const ok = await claimDiscount(senderId, { code: plan.discountCode, planId: plan.planId, price: plan.price, at: Date.now() });
+          if (!ok) {
+            const used = await getUsedDiscount(senderId).catch(() => null);
+            discountNote = `Note: customer tried ${plan.discountCode} but already used a discount${used && used.code ? ` (${used.code})` : ""}; regular price charged.\n`;
+            plan = { ...basePlan, discountError: alreadyUsedMessage(used) };
+          }
+        } catch (err) {
+          console.error("[discount] could not record discount:", err.message);
+          discountNote = "⚠️ Couldn't check the discount database -- please make sure this customer hasn't used a discount before.\n";
+        }
+      } else if (plan.discountError) {
+        discountNote = `Note: customer tried an invalid code (${input.discountCode}); regular price charged.\n`;
+      }
 
       const methodName = PAYMENT_METHODS[methodKey];
       // All our QR codes are InstaPay QRs, which any Philippine bank or e-wallet app can scan.
@@ -239,9 +320,11 @@ async function runTool(name, input, senderId) {
           `Plan: ${plan.name} (${plan.destination}, ${plan.data}, ${plan.validityDays} days${plan.callsAndTexts ? ", with calls & texts" : ""})\n` +
           (plan.discountCode
             ? `Price: ${plan.price} (code ${plan.discountCode}: ${plan.discountPercent}% off ${plan.regularPrice}, saves ${plan.discountAmount})\n` +
-              `👉 Check this customer bought from us before and hasn't used ${plan.discountCode} yet.\n`
+              (plan.discountCode === "WELCOME10"
+                ? `👉 WELCOME10 is for NEW customers -- check they haven't bought from you before (e.g. on your personal Facebook).\n`
+                : `👉 ${plan.discountCode} is for returning customers you sent it to -- check this is one of them.\n`)
             : `Price: ${plan.price}\n`) +
-          (plan.discountError ? `Note: customer tried an invalid code (${input.discountCode}); regular price charged.\n` : "") +
+          discountNote +
           `Payment: ${methodName}\n` +
           `Email: ${email}\n` +
           `Deliver via: ${input.deliverVia || "not specified"}\n` +
@@ -255,6 +338,7 @@ async function runTool(name, input, senderId) {
         plan: plan.name,
         price: plan.price,
         ...(plan.discountCode ? { regularPrice: plan.regularPrice, discountApplied: `${plan.discountCode} (${plan.discountPercent}% off)` } : {}),
+        ...(plan.discountError ? { discountNotApplied: plan.discountError } : {}),
         paymentMethod: methodName,
         paymentQrSentToCustomer: qrSent,
         instructionsForYou: qrSent
