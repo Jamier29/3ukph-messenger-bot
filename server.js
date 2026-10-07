@@ -158,15 +158,26 @@ if (!UPSTASH_URL || !UPSTASH_TOKEN) {
   console.warn("[startup] UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN not set -- used discount codes are only remembered until the server restarts.");
 }
 
+// Never let the token show up in error messages or logs.
+function redact(text) {
+  let t = String(text || "");
+  if (UPSTASH_TOKEN) t = t.split(UPSTASH_TOKEN).join("***");
+  return t.replace(/Bearer\s+\S+/g, "Bearer ***");
+}
+
 async function redis(command) {
-  const res = await fetch(UPSTASH_URL, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${UPSTASH_TOKEN}`, "Content-Type": "application/json" },
-    body: JSON.stringify(command)
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok || data.error) throw new Error(data.error || `Upstash HTTP ${res.status}`);
-  return data.result;
+  try {
+    const res = await fetch(UPSTASH_URL, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${UPSTASH_TOKEN}`, "Content-Type": "application/json" },
+      body: JSON.stringify(command)
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) throw new Error(data.error || `Upstash HTTP ${res.status}`);
+    return data.result;
+  } catch (err) {
+    throw new Error(redact(err.message).slice(0, 200));
+  }
 }
 
 // Startup self-test, so the Render logs show whether the discount database works.
@@ -177,7 +188,7 @@ async function checkDiscountDb() {
     const keys = await redis(["KEYS", "discount:used:*"]);
     return { ok: pong === "PONG", message: `connected to ${new URL(UPSTASH_URL).hostname} (${(keys || []).length} customers have used a discount)` };
   } catch (err) {
-    return { ok: false, message: `can't reach Upstash at "${UPSTASH_URL.replace(UPSTASH_TOKEN, "***")}": ${err.message}` };
+    return { ok: false, message: `can't reach Upstash at "${redact(UPSTASH_URL)}": ${err.message}` };
   }
 }
 if (UPSTASH_URL && UPSTASH_TOKEN) {
