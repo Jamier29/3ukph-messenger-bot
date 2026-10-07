@@ -138,8 +138,21 @@ function applyDiscount(plan, code) {
 // To let a customer use a discount again, delete their "discount:used:..."
 // key in Upstash (Data Browser).
 // ---------------------------------------------------------------------
-const UPSTASH_URL = (process.env.UPSTASH_REDIS_REST_URL || "").replace(/\/$/, "");
-const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || "";
+// Tidy up values pasted into Render: spaces, quotes, a leading "NAME=", and a
+// redis:// / rediss:// address (turned into the matching https:// REST address).
+function cleanEnv(v, name) {
+  let x = String(v || "").trim();
+  if (name && x.toUpperCase().startsWith(name + "=")) x = x.slice(name.length + 1).trim();
+  x = x.replace(/^["']+|["']+$/g, "").trim();
+  return x;
+}
+let UPSTASH_URL = cleanEnv(process.env.UPSTASH_REDIS_REST_URL, "UPSTASH_REDIS_REST_URL");
+const UPSTASH_TOKEN = cleanEnv(process.env.UPSTASH_REDIS_REST_TOKEN, "UPSTASH_REDIS_REST_TOKEN");
+if (/^rediss?:\/\//i.test(UPSTASH_URL)) {
+  try { UPSTASH_URL = "https://" + new URL(UPSTASH_URL).hostname; } catch { /* leave as is */ }
+}
+if (UPSTASH_URL && !/^https?:\/\//i.test(UPSTASH_URL)) UPSTASH_URL = "https://" + UPSTASH_URL;
+UPSTASH_URL = UPSTASH_URL.replace(/\/+$/, "");
 const usedDiscountsMemory = new Map(); // fallback only
 if (!UPSTASH_URL || !UPSTASH_TOKEN) {
   console.warn("[startup] UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN not set -- used discount codes are only remembered until the server restarts.");
@@ -154,6 +167,21 @@ async function redis(command) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data.error) throw new Error(data.error || `Upstash HTTP ${res.status}`);
   return data.result;
+}
+
+// Startup self-test, so the Render logs show whether the discount database works.
+async function checkDiscountDb() {
+  if (!UPSTASH_URL || !UPSTASH_TOKEN) return { ok: false, message: "UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN not set" };
+  try {
+    const pong = await redis(["PING"]);
+    const keys = await redis(["KEYS", "discount:used:*"]);
+    return { ok: pong === "PONG", message: `connected to ${new URL(UPSTASH_URL).hostname} (${(keys || []).length} customers have used a discount)` };
+  } catch (err) {
+    return { ok: false, message: `can't reach Upstash at "${UPSTASH_URL.replace(UPSTASH_TOKEN, "***")}": ${err.message}` };
+  }
+}
+if (UPSTASH_URL && UPSTASH_TOKEN) {
+  checkDiscountDb().then((r) => console.log(`[discount] Discount database: ${r.ok ? "✅" : "❌"} ${r.message}`));
 }
 
 // Returns { code, at } if this customer already used a discount, else null.
@@ -463,6 +491,16 @@ app.get("/api/price-status", (req, res) => {
 });
 // Update prices right now instead of waiting for the next automatic check.
 // Open https://3ukph.com/admin/refresh-prices?key=YOUR_ADMIN_KEY in a browser.
+// Check the discount database: https://3ukph.com/admin/discount-check?key=YOUR_ADMIN_KEY
+app.get("/admin/discount-check", async (req, res) => {
+  const want = process.env.ADMIN_KEY || "";
+  const got = String(req.query.key || "");
+  const okKey = want.length >= 12 && got.length === want.length && crypto.timingSafeEqual(Buffer.from(got), Buffer.from(want));
+  if (!okKey) return res.status(403).send("Wrong or missing key.");
+  const r = await checkDiscountDb();
+  res.type("text/plain").send(`Discount database: ${r.ok ? "OK ✅" : "NOT WORKING ❌"}\n${r.message}\n`);
+});
+
 app.get("/admin/refresh-prices", async (req, res) => {
   const want = process.env.ADMIN_KEY || "";
   const got = String(req.query.key || "");
