@@ -12,7 +12,7 @@ const fs = require("fs");
 const path = require("path");
 const express = require("express");
 const { BUSINESS_INFO } = require("./business-info");
-const { searchPlans, getPlan, listAllDestinations, getRate, headlinePrices, regionSummaries } = require("./planSearch");
+const { searchPlans, getPlan, listAllDestinations, getRate, headlinePrices, regionSummaries, formatPHP } = require("./planSearch");
 const { startPriceSync, syncPrices, getSyncStatus } = require("./priceSync");
 const crypto = require("crypto");
 
@@ -93,6 +93,42 @@ function normalizePaymentMethod(input) {
 // ---------------------------------------------------------------------
 // Tools the AI can call.
 // ---------------------------------------------------------------------
+// ---------------------------------------------------------------------
+// Discount codes. Default: SALAMAT10 = 10% off (thank-you code for past
+// customers). To change them without editing code, set DISCOUNT_CODES in
+// Render, e.g.  SALAMAT10:10,BAYANIHAN5:5   (set it to "none" to turn all off).
+// ---------------------------------------------------------------------
+const DISCOUNT_CODES = (() => {
+  const raw = (process.env.DISCOUNT_CODES || "SALAMAT10:10").trim();
+  const codes = {};
+  if (raw.toLowerCase() === "none") return codes;
+  for (const part of raw.split(",")) {
+    const [code, pct] = part.split(":").map((x) => (x || "").trim());
+    const n = Number(pct);
+    if (code && n > 0 && n < 100) codes[code.toUpperCase()] = n;
+  }
+  return codes;
+})();
+
+// Returns the plan with the discount applied (price = discounted price), or
+// the plan unchanged plus a discountError if the code isn't valid.
+function applyDiscount(plan, code) {
+  if (!plan || !code) return plan;
+  const key = String(code).trim().toUpperCase().replace(/\s+/g, "");
+  const pct = DISCOUNT_CODES[key];
+  if (!pct) return { ...plan, discountError: `"${code}" is not a valid discount code. Quote the regular price.` };
+  const discounted = Math.round(plan.pricePHP * (100 - pct)) / 100;
+  return {
+    ...plan,
+    regularPrice: plan.price,
+    discountCode: key,
+    discountPercent: pct,
+    discountAmount: formatPHP(Math.round((plan.pricePHP - discounted) * 100) / 100),
+    price: formatPHP(discounted),
+    pricePHP: discounted
+  };
+}
+
 const TOOLS = [
   {
     name: "search_esim_plans",
@@ -119,7 +155,10 @@ const TOOLS = [
       "a plan, before confirming the plan and price back to them.",
     input_schema: {
       type: "object",
-      properties: { planId: { type: "string", description: "The planId from a search result, e.g. 'P6413'." } },
+      properties: {
+        planId: { type: "string", description: "The planId from a search result, e.g. 'P6413'." },
+        discountCode: { type: "string", description: "Only if the customer gave a discount code (e.g. 'SALAMAT10'). The result's price is then the discounted price." }
+      },
       required: ["planId"]
     }
   },
@@ -135,6 +174,7 @@ const TOOLS = [
         paymentMethod: { type: "string", enum: ["GCash", "Maya", "MariBank", "UnionBank", "BPI"] },
         email: { type: "string", description: "Email address where the eSIM QR code should be sent." },
         deliverVia: { type: "string", enum: ["Messenger", "Email", "Both"], description: "How the customer wants the eSIM QR code." },
+        discountCode: { type: "string", description: "The discount code the customer gave, if any (only one that get_plan accepted)." },
         notes: { type: "string", description: "Anything else useful, e.g. 'eSIM is for a friend', travel dates, phone model." }
       },
       required: ["planId", "paymentMethod", "email"]
@@ -164,11 +204,11 @@ async function runTool(name, input, senderId) {
 
     case "get_plan": {
       const plan = getPlan(input.planId);
-      return plan ? plan : { error: "No plan with that planId. Search again." };
+      return plan ? applyDiscount(plan, input.discountCode) : { error: "No plan with that planId. Search again." };
     }
 
     case "create_order": {
-      const plan = getPlan(input.planId);
+      const plan = applyDiscount(getPlan(input.planId), input.discountCode);
       if (!plan) return { error: "No plan with that planId. Search again and confirm the plan with the customer." };
       const methodKey = normalizePaymentMethod(input.paymentMethod);
       if (!methodKey) return { error: "Unknown payment method. Accepted: GCash, Maya, MariBank, UnionBank, BPI." };
@@ -197,7 +237,11 @@ async function runTool(name, input, senderId) {
         message:
           `Customer: ${customer}\n` +
           `Plan: ${plan.name} (${plan.destination}, ${plan.data}, ${plan.validityDays} days${plan.callsAndTexts ? ", with calls & texts" : ""})\n` +
-          `Price: ${plan.price}\n` +
+          (plan.discountCode
+            ? `Price: ${plan.price} (code ${plan.discountCode}: ${plan.discountPercent}% off ${plan.regularPrice}, saves ${plan.discountAmount})\n` +
+              `👉 Check this customer bought from us before and hasn't used ${plan.discountCode} yet.\n`
+            : `Price: ${plan.price}\n`) +
+          (plan.discountError ? `Note: customer tried an invalid code (${input.discountCode}); regular price charged.\n` : "") +
           `Payment: ${methodName}\n` +
           `Email: ${email}\n` +
           `Deliver via: ${input.deliverVia || "not specified"}\n` +
@@ -210,6 +254,7 @@ async function runTool(name, input, senderId) {
         ok: true,
         plan: plan.name,
         price: plan.price,
+        ...(plan.discountCode ? { regularPrice: plan.regularPrice, discountApplied: `${plan.discountCode} (${plan.discountPercent}% off)` } : {}),
         paymentMethod: methodName,
         paymentQrSentToCustomer: qrSent,
         instructionsForYou: qrSent
@@ -291,6 +336,13 @@ function rememberSentId(mid) {
 // ---------------------------------------------------------------------
 // Business website homepage (3ukph.com)
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public", "index.html")));
+// Search engines: robots.txt and sitemap.xml (helps Google find and list 3ukph.com)
+app.get("/robots.txt", (req, res) => res.type("text/plain").send("User-agent: *\nAllow: /\nDisallow: /webhook\nDisallow: /admin/\n\nSitemap: https://3ukph.com/sitemap.xml\n"));
+app.get("/sitemap.xml", (req, res) => res.type("application/xml").send(
+  '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' +
+  '  <url><loc>https://3ukph.com/</loc><changefreq>weekly</changefreq><priority>1.0</priority></url>\n' +
+  '  <url><loc>https://3ukph.com/privacy</loc><changefreq>yearly</changefreq><priority>0.3</priority></url>\n' +
+  '</urlset>\n'));
 app.get("/logo.png", (req, res) => res.sendFile(path.join(__dirname, "public", "logo.png")));
 app.get("/favicon.png", (req, res) => res.sendFile(path.join(__dirname, "public", "favicon.png")));
 // Public plan-finder API used by the website (peso prices only, no cost data)
