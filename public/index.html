@@ -324,6 +324,50 @@ footer a{color:#fff}
   .reveal{opacity:1;transform:none}
 }
 @media(max-width:1099px){.nav-tv{display:none}}
+/* floating WELCOME10 voucher */
+.vch{position:fixed;left:16px;bottom:16px;z-index:35;touch-action:none;user-select:none;-webkit-user-select:none;opacity:0;transform:translateY(16px) scale(.96);pointer-events:none;transition:opacity .3s,transform .3s}
+.vch.show{opacity:1;transform:none;pointer-events:auto}
+.vch.dragging{transition:none;cursor:grabbing}
+.vch-card{position:relative;width:196px;background:linear-gradient(135deg,#cf0507,#00166a);color:#fff;border-radius:16px;padding:12px 14px 12px;box-shadow:0 10px 30px rgba(0,22,106,.35);cursor:grab;font-family:var(--font-sans)}
+.vch-top{display:flex;align-items:center;gap:6px;font:700 10px/14px var(--font-sans);letter-spacing:.08em;text-transform:uppercase;opacity:.9}
+.vch-grip{margin-left:auto;font-size:13px;letter-spacing:-2px;opacity:.7}
+.vch-off{font:800 28px/32px var(--font-sans);margin:2px 0 6px}
+.vch-off small{font:700 13px/16px var(--font-sans);margin-left:4px}
+.vch-code{display:flex;align-items:center;justify-content:center;gap:6px;background:#f8c830;color:#00166a;border:2px dashed #00166a;border-radius:8px;padding:5px 8px;font:800 16px/20px var(--font-sans);letter-spacing:.08em;white-space:nowrap}
+.vch-note{font-size:11px;line-height:15px;opacity:.85;margin-top:6px}
+.vch-x{position:absolute;top:-8px;right:-8px;width:26px;height:26px;border-radius:50%;border:2px solid #fff;background:#00166a;color:#fff;font:700 15px/1 var(--font-sans);cursor:pointer;display:grid;place-items:center;padding:0 0 2px}
+.vch-x:focus-visible,.vch-card:focus-visible,.vch-mini:focus-visible{outline:3px solid #f8c830;outline-offset:2px}
+.vch-mini{display:none;width:58px;height:58px;border-radius:50%;background:linear-gradient(135deg,#cf0507,#00166a);color:#fff;border:3px solid #f8c830;box-shadow:0 8px 22px rgba(0,22,106,.35);cursor:grab;font:800 12px/1 var(--font-sans);flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:0}
+.vch-mini b{font-size:20px;line-height:1}
+.vch.min .vch-card{display:none}.vch.min .vch-mini{display:flex}
+@media(max-width:600px){.vch-card{width:168px;padding:10px 12px}.vch-off{font-size:24px;line-height:28px;margin:0 0 4px}.vch-code{font-size:14px}.vch-note{font-size:10px}}
+@media (prefers-reduced-motion: reduce){.vch{transition:none}}
+/* reviews */
+.rv-car{position:relative;margin-top:var(--space-8)}
+.rv-track{display:flex;gap:var(--space-4);overflow-x:auto;scroll-snap-type:x mandatory;scroll-behavior:smooth;padding:4px 2px 16px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.rv-track::-webkit-scrollbar{display:none}
+.rv-track:focus-visible{outline:2px solid var(--brand-blue);outline-offset:4px;border-radius:var(--radius-md)}
+.rv-track .rv{flex:0 0 calc((100% - 2*var(--space-4))/3);scroll-snap-align:start}
+@media(max-width:900px){.rv-track .rv{flex-basis:calc((100% - var(--space-4))/2)}}
+@media(max-width:600px){.rv-track .rv{flex-basis:86%}}
+.rv-nav{position:absolute;top:calc(50% - 30px);width:44px;height:44px;border-radius:50%;border:1px solid var(--hairline);background:var(--surface);color:var(--brand-blue);font:700 26px/1 var(--font-sans);cursor:pointer;box-shadow:var(--shadow-card);z-index:2;display:grid;place-items:center;padding:0 0 3px}
+.rv-nav:hover{background:var(--brand-blue);color:var(--on-brand-blue)}
+.rv-nav:focus-visible{outline:2px solid var(--brand-blue);outline-offset:2px}
+.rv-nav.prev{left:-22px}.rv-nav.next{right:-22px}
+@media(max-width:1200px){.rv-nav.prev{left:-6px}.rv-nav.next{right:-6px}}
+@media(max-width:600px){.rv-nav{display:none}}
+.rv-dots{display:flex;justify-content:center;gap:8px;margin-top:var(--space-2)}
+.rv-dots button{width:10px;height:10px;border-radius:999px;border:0;padding:0;background:var(--border);opacity:.5;cursor:pointer;transition:width .25s,opacity .25s,background .25s}
+.rv-dots button[aria-selected="true"]{width:26px;opacity:1;background:var(--brand-blue)}
+.rv{margin:0;display:flex;flex-direction:column;gap:var(--space-3);background:var(--surface);border:1px solid var(--hairline);border-radius:var(--radius-md);padding:var(--space-6);box-shadow:var(--shadow-card)}
+.rv-stars{color:#e0a21c;letter-spacing:2px;font-size:18px;line-height:1}
+.rv blockquote{margin:0;font-size:15px;line-height:23px;color:var(--ink);flex:1}
+.rv figcaption{display:flex;align-items:center;gap:var(--space-3)}
+.rv figcaption b{display:block;font-size:15px}
+.rv figcaption small{display:block;color:var(--ink-muted);font-size:13px;line-height:18px}
+.rv-av{flex:none;width:40px;height:40px;border-radius:50%;display:grid;place-items:center;font:700 14px/1 var(--font-sans);background:var(--brand-blue);color:var(--on-brand-blue)}
+.rv-av.sea{background:var(--brand-red);color:var(--on-brand-red)}
+.rv-more{text-align:center;margin-top:var(--space-8)}
 /* trivia */
 .trivia{background:linear-gradient(135deg,#00166a,#012ca5);color:#fff;position:relative;overflow:hidden}
 .trivia::before{content:"";position:absolute;inset:0;background-image:radial-gradient(rgba(255,255,255,.12) 1px,transparent 1.3px);background-size:22px 22px;opacity:.5;pointer-events:none}
@@ -660,6 +704,57 @@ footer a{color:#fff}
   </div>
 </section>
 
+<!-- REVIEWS -->
+<section id="reviews" class="alt">
+  <div class="wrap">
+    <div class="reveal">
+      <span class="label">Customer reviews</span>
+      <h2 class="h2">Loved by travelers and seafarers.</h2>
+      <p class="lead">Real words from customers on our Facebook page.</p>
+    </div>
+    <div class="rv-car" role="region" aria-roledescription="carousel" aria-label="Customer reviews">
+      <button type="button" class="rv-nav prev" aria-label="Previous review">‹</button>
+      <div class="rv-track" id="rvTrack" tabindex="0">
+      <figure class="rv">
+        <div class="rv-stars" aria-label="5 out of 5 stars">★★★★★</div><blockquote>“My first trip to Canada and my first time using an eSIM. 3UKPH made everything easy!”</blockquote>
+        <figcaption><span class="rv-av" aria-hidden="true">AP</span><span><b>Antonino P.</b><small>Traveler · Canada · via Facebook</small></span></figcaption>
+      </figure>
+      <figure class="rv">
+        <blockquote>“As a seafarer for many years staying connected was always a problem but when I had this 3UK ESIM this change my whole travel journey…”</blockquote>
+        <figcaption><span class="rv-av sea" aria-hidden="true">MA</span><span><b>Mark Anthony J.</b><small>Seafarer · via Facebook</small></span></figcaption>
+      </figure>
+      <figure class="rv">
+        <blockquote>“Used this esim when i went to Florida and compared to my network roaming data, this esim was way more reliable and stable! This is now my go-to esim for international travels!”</blockquote>
+        <figcaption><span class="rv-av" aria-hidden="true">MR</span><span><b>Mutya R.</b><small>Traveler · Florida, USA · via Facebook</small></span></figcaption>
+      </figure>
+      <figure class="rv">
+        <blockquote>“Hello po, just want to say thank you sa pag assist sa parents ko para makapag activate ng esim nila habang nasa ibang bansa. I re-recommend ko po kayo sa mga friends…”</blockquote>
+        <figcaption><span class="rv-av" aria-hidden="true">PR</span><span><b>Precious R.</b><small>Family abroad · via Facebook</small></span></figcaption>
+      </figure>
+      <figure class="rv">
+        <div class="rv-stars" aria-label="5 out of 5 stars">★★★★★</div><blockquote>“As a seaman, having a good internet connection when we&#x27;re in port is very important. I&#x27;ve been using 3UKPH…”</blockquote>
+        <figcaption><span class="rv-av sea" aria-hidden="true">JP</span><span><b>Jan Paulo B.</b><small>Seafarer · via Facebook</small></span></figcaption>
+      </figure>
+      <figure class="rv">
+        <div class="rv-stars" aria-label="5 out of 5 stars">★★★★★</div><blockquote>“My Travel Companion Across Europe &amp; Asia! 🌍✈️ I travel frequently between Europe and Asia…”</blockquote>
+        <figcaption><span class="rv-av" aria-hidden="true">PB</span><span><b>Paolo B.</b><small>Traveler · Europe &amp; Asia · via Facebook</small></span></figcaption>
+      </figure>
+      <figure class="rv">
+        <div class="rv-stars" aria-label="5 out of 5 stars">★★★★★</div><blockquote>“I&#x27;ve been traveling around Asia quite often, and 3UKPH eSIM has been one of the most convenient eSIMs I&#x27;ve used…”</blockquote>
+        <figcaption><span class="rv-av" aria-hidden="true">RT</span><span><b>Roceta T.</b><small>Traveler · Asia · via Facebook</small></span></figcaption>
+      </figure>
+      <figure class="rv">
+        <blockquote>“100% Legit, Highly Recommended po. Thank you 3UK sa mabilis at reliable na service.”</blockquote>
+        <figcaption><span class="rv-av" aria-hidden="true">MK</span><span><b>Mary Kristine R.</b><small>Customer · via Facebook</small></span></figcaption>
+      </figure>
+      </div>
+      <button type="button" class="rv-nav next" aria-label="Next review">›</button>
+    </div>
+    <div class="rv-dots" id="rvDots" role="tablist" aria-label="Choose review"></div>
+    <div class="rv-more reveal"><a class="uk-btn uk-btn-secondary" href="https://www.facebook.com/103294518884622/reviews" target="_blank" rel="noopener">See all reviews on Facebook</a></div>
+  </div>
+</section>
+
 <!-- TRIVIA -->
 <section id="trivia" class="trivia">
   <div class="wrap">
@@ -760,7 +855,7 @@ footer a{color:#fff}
         <p>Travel eSIMs for 200+ destinations, for travelers and seafarers — priced in pesos and delivered in minutes. Open 24/7.</p>
         <div class="tag">Global Connections. Endless Possibilities.</div>
       </div>
-      <div><h4>Explore</h4><ul><li><a href="#finder">Find a plan</a></li><li><a href="#seafarers">For seafarers</a></li><li><a href="#calc">Data calculator</a></li><li><a href="#trivia">Crew trivia</a></li><li><a href="#faq">FAQ</a></li><li><a href="https://3ukph.com/privacy">Privacy Policy</a></li></ul></div>
+      <div><h4>Explore</h4><ul><li><a href="#finder">Find a plan</a></li><li><a href="#seafarers">For seafarers</a></li><li><a href="#calc">Data calculator</a></li><li><a href="#reviews">Reviews</a></li><li><a href="#trivia">Crew trivia</a></li><li><a href="#faq">FAQ</a></li><li><a href="https://3ukph.com/privacy">Privacy Policy</a></li></ul></div>
       <div><h4>Contact</h4><ul><li><a href="https://www.messenger.com/t/103294518884622">Messenger: 3UK Philippines</a></li><li><a href="tel:+639672130757">+63 967 213 0757</a></li><li><a href="mailto:admin@3ukph.com">admin@3ukph.com</a></li><li>Taguig City, Metro Manila, Philippines</li></ul></div>
     </div>
     <div class="copy"><span>© 2026 3UKPH ESIM INTL E-LOAD AND SIMCARDS TRADING</span><span>DTI-registered</span></div>
@@ -1159,5 +1254,85 @@ renderFinder();
 </script>
 
 <!-- Cloudflare Web Analytics --><script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "26f2f7e9bcb045faa84f0ab5bbc9b80c"}'></script><!-- End Cloudflare Web Analytics -->
+<script>
+(function(){
+  var t=document.getElementById('rvTrack');if(!t)return;
+  var cards=[].slice.call(t.querySelectorAll('.rv')),dots=document.getElementById('rvDots'),car=t.parentNode;
+  var reduce=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function perView(){var w=cards[0].getBoundingClientRect().width||1;return Math.max(1,Math.round(t.clientWidth/w));}
+  function pages(){return Math.max(1,cards.length-perView()+1);}
+  function cur(){var x=t.scrollLeft,best=0,d=1e9;cards.forEach(function(c,i){var dd=Math.abs(c.offsetLeft-t.offsetLeft-x);if(dd<d){d=dd;best=i;}});return best;}
+  function go(i){var n=pages();i=(i%n+n)%n;t.scrollTo({left:cards[i].offsetLeft-t.offsetLeft,behavior:reduce?'auto':'smooth'});}
+  function drawDots(){dots.innerHTML='';for(var i=0;i<pages();i++){var b=document.createElement('button');b.type='button';b.setAttribute('role','tab');b.setAttribute('aria-label','Review '+(i+1));(function(k){b.onclick=function(){go(k);restart();};})(i);dots.appendChild(b);}mark();}
+  function mark(){var c=Math.min(cur(),pages()-1);[].forEach.call(dots.children,function(b,i){b.setAttribute('aria-selected',i===c?'true':'false');});}
+  car.querySelector('.prev').onclick=function(){go(cur()-1);restart();};
+  car.querySelector('.next').onclick=function(){go(cur()+1);restart();};
+  t.addEventListener('keydown',function(e){if(e.key==='ArrowRight'){e.preventDefault();go(cur()+1);restart();}if(e.key==='ArrowLeft'){e.preventDefault();go(cur()-1);restart();}});
+  var st;t.addEventListener('scroll',function(){clearTimeout(st);st=setTimeout(mark,80);});
+  var timer=null,paused=false;
+  function tick(){if(!paused&&!document.hidden)go(cur()+1);}
+  function restart(){clearInterval(timer);if(!reduce)timer=setInterval(tick,5000);}
+  ['mouseenter','touchstart','focusin'].forEach(function(ev){car.addEventListener(ev,function(){paused=true;},{passive:true});});
+  ['mouseleave','focusout'].forEach(function(ev){car.addEventListener(ev,function(){paused=false;});});
+  car.addEventListener('touchend',function(){setTimeout(function(){paused=false;},4000);},{passive:true});
+  var rt;window.addEventListener('resize',function(){clearTimeout(rt);rt=setTimeout(drawDots,150);});
+  drawDots();restart();
+})();
+</script>
+<!-- floating WELCOME10 voucher (drag to move) -->
+<div class="vch" id="vch" aria-live="polite">
+  <div class="vch-card" id="vchCard" role="button" tabindex="0" aria-label="10% off your first eSIM. Code WELCOME10. Click to copy the code. Drag to move.">
+    <button type="button" class="vch-x" id="vchX" aria-label="Minimize voucher">×</button>
+    <div class="vch-top">🎁 New customer <span class="vch-grip" aria-hidden="true">⠿⠿</span></div>
+    <div class="vch-off">10%<small>OFF</small></div>
+    <div class="vch-code">WELCOME10</div>
+    <div class="vch-note">Tap to copy · drag to move</div>
+  </div>
+  <button type="button" class="vch-mini" id="vchMini" aria-label="Show 10% welcome voucher. Drag to move."><b>🎁</b>10%</button>
+</div>
+<script>
+(function(){
+  var box=document.getElementById('vch');if(!box)return;
+  var card=document.getElementById('vchCard'),mini=document.getElementById('vchMini'),x=document.getElementById('vchX');
+  var KEY='vch3uk';
+  function load(){try{return JSON.parse(localStorage.getItem(KEY)||'{}');}catch(e){return {};}}
+  function save(o){try{localStorage.setItem(KEY,JSON.stringify(o));}catch(e){}}
+  var st=load();
+  if(st.min)box.classList.add('min');
+  function clamp(){var r=box.getBoundingClientRect(),W=window.innerWidth,H=window.innerHeight,m=8;
+    var l=Math.min(Math.max(m,r.left),W-r.width-m),t=Math.min(Math.max(m,r.top),H-r.height-m);
+    box.style.left=l+'px';box.style.top=t+'px';box.style.bottom='auto';}
+  function place(){if(typeof st.x==='number'){box.style.left=(st.x*window.innerWidth)+'px';box.style.top=(st.y*window.innerHeight)+'px';box.style.bottom='auto';clamp();}}
+  place();
+  function remember(){var r=box.getBoundingClientRect();st.x=r.left/window.innerWidth;st.y=r.top/window.innerHeight;save(st);}
+  // show after scrolling a bit
+  function onScroll(){box.classList.toggle('show',window.scrollY>320);}
+  window.addEventListener('scroll',onScroll,{passive:true});onScroll();
+  window.addEventListener('resize',function(){if(box.style.top)clamp();});
+  // toast
+  function toast(m){var t=document.getElementById('copytoast');if(!t){t=document.createElement('div');t.id='copytoast';document.body.appendChild(t);}
+    t.textContent=m;t.classList.add('show');setTimeout(function(){t.classList.remove('show');},3200);}
+  function copy(){var done=function(){toast('Code WELCOME10 copied! Type it when you order on Messenger.');};
+    try{navigator.clipboard.writeText('WELCOME10').then(done,done);}catch(e){done();}}
+  function setMin(v){box.classList.toggle('min',v);st.min=v;save(st);if(box.style.top)clamp();(v?mini:card).focus({preventScroll:true});}
+  // drag (mouse + touch) with click detection
+  function draggable(el,onTap){
+    var sx,sy,ox,oy,moved=false,id=null;
+    el.addEventListener('pointerdown',function(e){if(e.target===x)return;if(e.button!==undefined&&e.button!==0)return;
+      id=e.pointerId;moved=false;var r=box.getBoundingClientRect();sx=e.clientX;sy=e.clientY;ox=r.left;oy=r.top;try{el.setPointerCapture(id);}catch(_){}});
+    el.addEventListener('pointermove',function(e){if(id!==e.pointerId)return;var dx=e.clientX-sx,dy=e.clientY-sy;
+      if(!moved&&Math.abs(dx)+Math.abs(dy)<6)return;
+      if(!moved){moved=true;box.classList.add('dragging');}
+      box.style.left=(ox+dx)+'px';box.style.top=(oy+dy)+'px';box.style.bottom='auto';clamp();e.preventDefault();});
+    function end(e){if(id!==e.pointerId)return;id=null;box.classList.remove('dragging');
+      if(moved){remember();}else if(e.type==='pointerup'){onTap();}}
+    el.addEventListener('pointerup',end);el.addEventListener('pointercancel',end);
+    el.addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();onTap();}});
+  }
+  draggable(card,copy);
+  draggable(mini,function(){setMin(false);});
+  x.addEventListener('click',function(e){e.stopPropagation();setMin(true);});
+})();
+</script>
 </body>
 </html>
