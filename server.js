@@ -59,8 +59,23 @@ const PAYMENT_METHODS = {
   maya: "Maya",
   maribank: "MariBank",
   unionbank: "UnionBank",
-  bpi: "BPI"
+  bpi: "BPI",
+  paypal: "PayPal"
 };
+
+// PayPal (for customers abroad): they pay in USD via this payment link, where
+// they type in the amount we quote. Override with PAYPAL_LINK in Render.
+// PAYPAL_EXTRA_PERCENT (default 0) adds a % on top of the USD price to cover
+// PayPal's fees, e.g. 5 -> a $16.74 plan is quoted as $17.58.
+const PAYPAL_LINK = (process.env.PAYPAL_LINK || "https://www.paypal.com/ncp/payment/GWWNPBXR353YJ").trim();
+const PAYPAL_EXTRA_PERCENT = Math.max(0, Number(process.env.PAYPAL_EXTRA_PERCENT) || 0);
+
+// USD amount for a PayPal order: the peso price (after any discount) converted
+// back at our fixed rate, plus the optional PayPal fee %, rounded UP to the cent.
+function paypalUsdAmount(pricePHP) {
+  const usd = (pricePHP / getRate()) * (1 + PAYPAL_EXTRA_PERCENT / 100);
+  return Math.ceil(Math.round(usd * 10000) / 100) / 100;
+}
 
 function findQrFile(methodKey) {
   const dir = path.join(__dirname, "public", "qr");
@@ -87,6 +102,7 @@ function normalizePaymentMethod(input) {
   if (s.includes("mari") || s.includes("seabank")) return "maribank";
   if (s.includes("union")) return "unionbank";
   if (s.includes("bpi") || s.includes("philippineislands")) return "bpi";
+  if (s.includes("paypal") || s.includes("card") || s.includes("visa") || s.includes("mastercard")) return "paypal";
   return null;
 }
 
@@ -258,12 +274,13 @@ const TOOLS = [
     name: "create_order",
     description:
       "Place the order once you know: the exact plan (planId), the payment method, and the customer's email. " +
-      "This sends the customer the payment QR code for their chosen method and alerts the admin.",
+      "This sends the customer the payment QR code for their chosen method (or the PayPal link and USD amount " +
+      "for PayPal) and alerts the admin.",
     input_schema: {
       type: "object",
       properties: {
         planId: { type: "string" },
-        paymentMethod: { type: "string", enum: ["GCash", "Maya", "MariBank", "UnionBank", "BPI"] },
+        paymentMethod: { type: "string", enum: ["GCash", "Maya", "MariBank", "UnionBank", "BPI", "PayPal"] },
         email: { type: "string", description: "Email address where the eSIM QR code should be sent." },
         deliverVia: { type: "string", enum: ["Messenger", "Email", "Both"], description: "How the customer wants the eSIM QR code." },
         discountCode: { type: "string", description: "The discount code the customer gave, if any (only one that get_plan accepted)." },
@@ -312,7 +329,7 @@ async function runTool(name, input, senderId) {
       const basePlan = getPlan(input.planId);
       if (!basePlan) return { error: "No plan with that planId. Search again and confirm the plan with the customer." };
       const methodKey = normalizePaymentMethod(input.paymentMethod);
-      if (!methodKey) return { error: "Unknown payment method. Accepted: GCash, Maya, MariBank, UnionBank, BPI." };
+      if (!methodKey) return { error: "Unknown payment method. Accepted: GCash, Maya, MariBank, UnionBank, BPI, PayPal." };
       const email = String(input.email || "").trim();
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { error: "That email looks invalid. Ask the customer to re-type it." };
 
@@ -336,6 +353,48 @@ async function runTool(name, input, senderId) {
       }
 
       const methodName = PAYMENT_METHODS[methodKey];
+
+      // PayPal (customers abroad): quote a USD amount and give the PayPal link.
+      if (methodKey === "paypal") {
+        const usd = paypalUsdAmount(plan.pricePHP);
+        const usdText = `USD ${usd.toFixed(2)}`;
+        const ppQr = findQrFile("paypal");
+        let ppQrSent = false;
+        if (ppQr && PUBLIC_URL) ppQrSent = await sendImage(senderId, `${PUBLIC_URL}/qr/${ppQr}`);
+
+        const customer = await getCustomerName(senderId);
+        await notifyAdmin({
+          title: `New order: ${usdText} via PayPal`,
+          message:
+            `Customer: ${customer}\n` +
+            `Plan: ${plan.name} (${plan.destination}, ${plan.data}, ${plan.validityDays} days${plan.callsAndTexts ? ", with calls & texts" : ""})\n` +
+            `Amount to receive on PayPal: ${usdText} (peso price ${plan.price}${PAYPAL_EXTRA_PERCENT ? ` + ${PAYPAL_EXTRA_PERCENT}% PayPal fee` : ""})\n` +
+            (plan.discountCode ? `Discount: ${plan.discountCode} (${plan.discountPercent}% off ${plan.regularPrice})\n` : "") +
+            discountNote +
+            `Email: ${email}\n` +
+            `Deliver via: ${input.deliverVia || "not specified"}\n` +
+            (input.notes ? `Notes: ${input.notes}\n` : "") +
+            `👉 Check in PayPal that exactly ${usdText} arrived before sending the eSIM.`,
+          tags: "moneybag"
+        });
+
+        return {
+          ok: true,
+          plan: plan.name,
+          price: usdText,
+          ...(plan.discountCode ? { discountApplied: `${plan.discountCode} (${plan.discountPercent}% off)` } : {}),
+          ...(plan.discountError ? { discountNotApplied: plan.discountError } : {}),
+          paymentMethod: "PayPal",
+          paypalLink: PAYPAL_LINK,
+          instructionsForYou:
+            `Give the customer this PayPal link: ${PAYPAL_LINK} ` +
+            (ppQrSent ? "(a PayPal QR code image was also just sent to them) " : "") +
+            `Tell them to enter exactly ${usdText} as the amount, pay with their PayPal account or a credit/debit card, ` +
+            `then send a screenshot of the PayPal receipt here. Their eSIM QR code arrives after the payment is confirmed. ` +
+            `Quote ONLY ${usdText} for this order (not the peso price).`
+        };
+      }
+
       // All our QR codes are InstaPay QRs, which any Philippine bank or e-wallet app can scan.
       // If there's no QR for the chosen method (e.g. Maya, BPI), send an InstaPay QR they can scan from that app.
       let qrFile = findQrFile(methodKey);
