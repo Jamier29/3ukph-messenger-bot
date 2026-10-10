@@ -95,6 +95,12 @@ const INSTAPAY_FALLBACK = {
   maribank: ["unionbank", "gcash"]
 };
 
+// "₱1,037.88" / "PHP 1037.88" / 1037.88 -> 1037.88 (null if no number)
+function priceNumber(v) {
+  const m = String(v ?? "").replace(/,/g, "").match(/\d+(\.\d+)?/);
+  return m ? Math.round(parseFloat(m[0]) * 100) / 100 : null;
+}
+
 function normalizePaymentMethod(input) {
   const s = String(input || "").toLowerCase().replace(/[^a-z]/g, "");
   if (s.includes("gcash")) return "gcash";
@@ -279,14 +285,15 @@ const TOOLS = [
     input_schema: {
       type: "object",
       properties: {
-        planId: { type: "string" },
+        planId: { type: "string", description: "The planId of the EXACT plan the customer confirmed (the one whose price you quoted)." },
+        confirmedPrice: { type: "string", description: "The exact peso price you last quoted the customer for this plan, from get_plan (e.g. '₱1,037.88', or the discounted price if a code was accepted)." },
         paymentMethod: { type: "string", enum: ["GCash", "Maya", "MariBank", "UnionBank", "BPI", "PayPal"] },
         email: { type: "string", description: "Email address where the eSIM QR code should be sent." },
         deliverVia: { type: "string", enum: ["Messenger", "Email", "Both"], description: "How the customer wants the eSIM QR code." },
         discountCode: { type: "string", description: "The discount code the customer gave, if any (only one that get_plan accepted)." },
         notes: { type: "string", description: "Anything else useful, e.g. 'eSIM is for a friend', travel dates, phone model." }
       },
-      required: ["planId", "paymentMethod", "email"]
+      required: ["planId", "confirmedPrice", "paymentMethod", "email"]
     }
   },
   {
@@ -332,6 +339,22 @@ async function runTool(name, input, senderId) {
       if (!methodKey) return { error: "Unknown payment method. Accepted: GCash, Maya, MariBank, UnionBank, BPI, PayPal." };
       const email = String(input.email || "").trim();
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { error: "That email looks invalid. Ask the customer to re-type it." };
+
+      // Safety check: the plan being ordered must cost what the customer was quoted.
+      // Catches a wrong planId (several plans share a name). Done before any side effects.
+      const quoted = priceNumber(input.confirmedPrice);
+      const expected = applyDiscount(basePlan, input.discountCode);
+      const candidates = [expected.pricePHP, basePlan.pricePHP].map((n) => Math.round(n * 100) / 100);
+      if (quoted === null || !candidates.includes(quoted)) {
+        console.warn(`[order] price mismatch: planId ${input.planId} costs ${expected.price}, bot quoted ${input.confirmedPrice}`);
+        return {
+          error:
+            `Price check failed: planId ${input.planId} costs ${expected.price}, but confirmedPrice was "${input.confirmedPrice || ""}". ` +
+            "You probably used the wrong planId. Do NOT place the order yet. Find the planId of the plan the customer actually " +
+            "agreed to (call get_plan to check its price), then call create_order again with that planId and its exact price. " +
+            "Do not tell the customer about this check unless the price they will pay changes."
+        };
+      }
 
       // Discount: only one per customer, ever. Record it now (atomically) so it can't be used twice.
       let plan = applyDiscount(basePlan, input.discountCode);

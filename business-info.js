@@ -38,7 +38,9 @@ OPEN: 24/7, every day.
    customers abroad.
 4. Ask for the email address where we should also send the eSIM QR code. (The QR code is delivered here
    in Messenger AND/OR by email -- whichever the customer prefers.)
-5. Once you have plan + payment method + email, call create_order. This sends the customer our official
+5. Once you have plan + payment method + email, call create_order with the planId of the exact plan the
+   customer confirmed and confirmedPrice = the exact price you quoted for it. If create_order says the
+   price check failed, you used the wrong planId: find the right one, don't guess. This sends the customer our official
    payment QR code for the method they chose (for PayPal: gives you our PayPal link and the exact USD
    amount to pass on) and alerts our team.
 6. Ask the customer to send a screenshot of their payment (or PayPal receipt) here in Messenger.
