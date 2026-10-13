@@ -530,6 +530,13 @@ function isPaused(senderId) {
   return true;
 }
 
+const adminSentIds = new Set(); // message ids sent from the Admin Console
+function rememberAdminSent(mid) {
+  if (!mid) return;
+  adminSentIds.add(mid);
+  if (adminSentIds.size > 2000) adminSentIds.delete(adminSentIds.values().next().value);
+}
+
 function rememberSentId(mid) {
   if (!mid) return;
   botSentMessageIds.add(mid);
@@ -617,55 +624,44 @@ function requireAdmin(req, res, next) {
   if (!adminKeyOk(req.get("x-admin-key"))) return res.status(403).json({ error: "Wrong or missing admin key." });
   next();
 }
-async function graphGet(pathAndQuery) {
-  const sep = pathAndQuery.includes("?") ? "&" : "?";
-  const r = await fetch(`https://graph.facebook.com/v21.0/${pathAndQuery}${sep}access_token=${encodeURIComponent(PAGE_ACCESS_TOKEN)}`);
-  const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error((data.error && data.error.message) || `Facebook error ${r.status}`);
-  return data;
-}
-let cachedPageId = null;
-async function getPageInfo() {
-  const d = await graphGet("me?fields=id,name,category,picture.type(large){url}");
-  cachedPageId = d.id;
-  return { id: d.id, name: d.name, category: d.category || "", picture: d.picture && d.picture.data && d.picture.data.url };
+// The console works with the pages_messaging permission only: the page is
+// identified from webhook events, and the chat list/history comes from a small
+// in-memory log the server keeps of messages it receives and sends.
+let cachedPageId = process.env.PAGE_ID || null;
+const PAGE_NAME = process.env.PAGE_NAME || "3UK Philippines";
+const chatLog = new Map(); // psid -> [{ text, fromPage, by, time }]
+function recordChat(psid, fromPage, text, by) {
+  if (!psid) return;
+  const list = chatLog.get(psid) || [];
+  list.push({ text: String(text || "").slice(0, 2000), fromPage: !!fromPage, by: by || (fromPage ? "bot" : "customer"), time: new Date().toISOString() });
+  while (list.length > 50) list.shift();
+  chatLog.delete(psid); chatLog.set(psid, list); // keep most recent last
+  while (chatLog.size > 300) chatLog.delete(chatLog.keys().next().value);
 }
 
 app.get("/admin/console", (req, res) => res.sendFile(path.join(__dirname, "public", "admin.html")));
 
-app.get("/admin/api/page", requireAdmin, async (req, res) => {
-  try { res.json(await getPageInfo()); } catch (e) { res.status(502).json({ error: e.message }); }
+app.get("/admin/api/page", requireAdmin, (req, res) => {
+  res.json({ id: cachedPageId || "(appears after the first message)", name: PAGE_NAME, category: "Messenger connected via pages_messaging", picture: "/logo.png" });
 });
 
 app.get("/admin/api/conversations", requireAdmin, async (req, res) => {
-  try {
-    if (!cachedPageId) await getPageInfo();
-    const d = await graphGet("me/conversations?platform=messenger&limit=15&fields=id,updated_time,snippet,unread_count,participants");
-    const list = (d.data || []).map((c) => {
-      const people = (c.participants && c.participants.data) || [];
-      const customer = people.find((p) => p.id !== cachedPageId) || {};
-      return {
-        id: c.id, updated: c.updated_time, snippet: c.snippet || "", unread: c.unread_count || 0,
-        customerName: customer.name || "Messenger user", psid: customer.id || null,
-        botPaused: customer.id ? isPaused(customer.id) : false
-      };
-    });
-    res.json(list);
-  } catch (e) { res.status(502).json({ error: e.message }); }
+  const entries = Array.from(chatLog.entries()).reverse().slice(0, 20);
+  const list = await Promise.all(entries.map(async ([psid, msgs]) => {
+    const last = msgs[msgs.length - 1] || {};
+    return { id: psid, psid, customerName: await getCustomerName(psid), snippet: last.text || "", updated: last.time, botPaused: isPaused(psid) };
+  }));
+  res.json(list);
 });
 
 app.get("/admin/api/messages", requireAdmin, async (req, res) => {
-  const conv = String(req.query.conv || "");
-  if (!/^t_[\w-]+$/.test(conv)) return res.status(400).json({ error: "Bad conversation id." });
-  try {
-    if (!cachedPageId) await getPageInfo();
-    const d = await graphGet(`${conv}/messages?limit=20&fields=id,message,from,created_time`);
-    const msgs = (d.data || []).reverse().map((m) => ({
-      id: m.id, text: m.message || "(attachment)", time: m.created_time,
-      fromPage: !!(m.from && m.from.id === cachedPageId), fromName: (m.from && m.from.name) || ""
-    }));
-    res.json(msgs);
-  } catch (e) { res.status(502).json({ error: e.message }); }
+  const psid = String(req.query.conv || "");
+  if (!/^\d+$/.test(psid)) return res.status(400).json({ error: "Bad conversation id." });
+  const name = await getCustomerName(psid);
+  res.json((chatLog.get(psid) || []).map((m, i) => ({
+    id: String(i), text: m.text, time: m.time, fromPage: m.fromPage,
+    fromName: m.fromPage ? (m.by === "admin" ? `${PAGE_NAME} (admin)` : `${PAGE_NAME} (AI assistant)`) : name
+  })));
 });
 
 // Sends a message as the page admin (no bot tag, so the bot pauses in that chat
@@ -684,6 +680,8 @@ app.post("/admin/api/send", requireAdmin, async (req, res) => {
     const data = await r.json().catch(() => ({}));
     if (!r.ok) return res.status(502).json({ error: (data.error && data.error.message) || `Facebook error ${r.status}` });
     pauseBot(psid);
+    rememberAdminSent(data.message_id);
+    recordChat(psid, true, text, "admin");
     res.json({ ok: true, messageId: data.message_id });
   } catch (e) { res.status(502).json({ error: e.message }); }
 });
@@ -725,6 +723,7 @@ app.post("/webhook", async (req, res) => {
   if (body.object !== "page") return;
 
   for (const entry of body.entry || []) {
+    if (entry.id) cachedPageId = entry.id;
     for (const event of entry.messaging || []) {
       try {
         await handleMessagingEvent(event);
@@ -743,7 +742,9 @@ async function handleMessagingEvent(event) {
   if (message && message.is_echo) {
     const customerId = event.recipient && event.recipient.id;
     const sentByBot = message.metadata === BOT_METADATA || botSentMessageIds.has(message.mid);
-    if (customerId && !sentByBot) {
+    const sentByConsole = adminSentIds.has(message.mid);
+    if (customerId && !sentByBot && !sentByConsole) {
+      recordChat(customerId, true, message.text || "(attachment)", "admin");
       pauseBot(customerId);
       console.log(`[handoff] Admin replied to ${customerId}; bot paused for ${BOT_PAUSE_HOURS}h.`);
     }
@@ -757,6 +758,7 @@ async function handleMessagingEvent(event) {
   let text = message && message.text;
   if (!text && event.postback) text = event.postback.title || event.postback.payload;
 
+  recordChat(senderId, false, text || (message && message.attachments ? "(attachment)" : ""), "customer");
   if (isPaused(senderId)) return; // a human is handling this chat
 
   if (!text) {
@@ -960,7 +962,8 @@ async function sendText(recipientId, text) {
   }
   if (rest) chunks.push(rest);
   for (const chunk of chunks) {
-    await callSendApi({ recipient: { id: recipientId }, messaging_type: "RESPONSE", message: { text: chunk } });
+    const sent = await callSendApi({ recipient: { id: recipientId }, messaging_type: "RESPONSE", message: { text: chunk } });
+    if (sent) recordChat(recipientId, true, chunk, "bot");
   }
 }
 
@@ -970,6 +973,7 @@ async function sendImage(recipientId, url) {
     messaging_type: "RESPONSE",
     message: { attachment: { type: "image", payload: { url, is_reusable: true } } }
   });
+  if (data) recordChat(recipientId, true, "(image)", "bot");
   return !!data;
 }
 
