@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>3UK Philippines Admin Console</title>
+<link rel="icon" href="/favicon.png">
+<style>
+  :root { --navy:#0e2578; --red:#d61c28; --gold:#e8b028; --bg:#f4f6fb; --card:#fff; --line:#e3e7f0; --muted:#5b6478; --ok:#1e8e3e; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background:var(--bg); color:#151a2d; }
+  header { background:var(--navy); color:#fff; padding:14px 20px; display:flex; align-items:center; gap:12px; }
+  header img { width:40px; height:40px; border-radius:50%; background:#fff; }
+  header h1 { font-size:18px; margin:0; }
+  header small { display:block; opacity:.8; font-weight:400; font-size:12px; }
+  main { max-width:1100px; margin:0 auto; padding:20px 16px 40px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px; margin-bottom:16px; }
+  .step { display:inline-block; background:var(--gold); color:var(--navy); font-weight:700; font-size:12px; border-radius:20px; padding:3px 10px; margin-bottom:6px; }
+  h2 { font-size:17px; margin:2px 0 4px; color:var(--navy); }
+  .help { color:var(--muted); font-size:13px; margin:0 0 12px; line-height:1.45; }
+  input[type=password], textarea { width:100%; border:1px solid var(--line); border-radius:10px; padding:10px 12px; font:inherit; }
+  textarea { min-height:80px; resize:vertical; }
+  button { font:inherit; font-weight:600; border:0; border-radius:10px; padding:10px 16px; cursor:pointer; background:var(--navy); color:#fff; }
+  button.red { background:var(--red); }
+  button.ghost { background:#eef1f8; color:var(--navy); }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .page { display:flex; gap:14px; align-items:center; }
+  .page img { width:64px; height:64px; border-radius:50%; border:1px solid var(--line); }
+  .badge { display:inline-block; font-size:12px; font-weight:600; border-radius:20px; padding:3px 10px; }
+  .badge.ok { background:#e6f4ea; color:var(--ok); }
+  .badge.paused { background:#fdecea; color:var(--red); }
+  .grid { display:grid; grid-template-columns: 320px 1fr; gap:16px; }
+  @media (max-width: 820px) { .grid { grid-template-columns: 1fr; } }
+  .conv { border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin-bottom:8px; cursor:pointer; }
+  .conv:hover { border-color:var(--navy); }
+  .conv.active { border-color:var(--navy); background:#eef1fb; }
+  .conv b { display:block; }
+  .conv span { color:var(--muted); font-size:12px; }
+  .thread { height:340px; overflow-y:auto; background:#f7f8fc; border:1px solid var(--line); border-radius:10px; padding:12px; display:flex; flex-direction:column; gap:6px; margin-bottom:12px; }
+  .msg { max-width:78%; padding:8px 12px; border-radius:16px; font-size:14px; line-height:1.35; white-space:pre-wrap; }
+  .msg.in { align-self:flex-start; background:#e9ebf1; }
+  .msg.out { align-self:flex-end; background:#0a7cff; color:#fff; }
+  .msg small { display:block; font-size:10px; opacity:.7; margin-top:3px; }
+  .status { font-size:13px; margin-top:8px; }
+  .status.ok { color:var(--ok); } .status.err { color:var(--red); }
+  .hidden { display:none; }
+</style>
+</head>
+<body>
+<header>
+  <img src="/logo.png" alt="3UK Philippines logo">
+  <h1>3UK Philippines Admin Console<small>Manage Messenger conversations for the 3UK Philippines Facebook Page</small></h1>
+</header>
+
+<main>
+  <!-- Login -->
+  <section class="card" id="loginCard">
+    <span class="step">Sign in</span>
+    <h2>Admin sign-in</h2>
+    <p class="help">Only the page owner can use this console. Enter the admin key to continue.</p>
+    <div class="row">
+      <input type="password" id="keyInput" placeholder="Admin key" style="max-width:340px" autocomplete="current-password">
+      <button id="loginBtn" title="Sign in to the admin console">Sign in</button>
+    </div>
+    <div class="status" id="loginStatus"></div>
+  </section>
+
+  <div id="app" class="hidden">
+    <!-- Step 1: connected Page -->
+    <section class="card">
+      <span class="step">Step 1</span>
+      <h2>Connected Facebook Page</h2>
+      <p class="help">This is the Facebook Page this app sends and receives Messenger messages for (asset connected through the Messenger API with the pages_messaging permission).</p>
+      <div class="page" id="pageBox">Loading…</div>
+    </section>
+
+    <div class="grid">
+      <!-- Step 2: conversations -->
+      <section class="card">
+        <span class="step">Step 2</span>
+        <h2>Choose a conversation</h2>
+        <p class="help">Recent customers who messaged the Page. Click one to open the chat.</p>
+        <div class="row" style="margin-bottom:10px"><button class="ghost" id="refreshBtn" title="Reload the list of conversations">↻ Refresh</button></div>
+        <div id="convList">Loading…</div>
+      </section>
+
+      <!-- Step 3: send -->
+      <section class="card">
+        <span class="step">Step 3</span>
+        <h2>Send a reply to Messenger</h2>
+        <p class="help">Type a message and click <b>Send to Messenger</b>. It is delivered instantly to the customer's Messenger app as a message from the Page. While an admin is replying, the AI assistant pauses in this chat; click <b>Resume AI assistant</b> to turn it back on.</p>
+        <div class="row" style="justify-content:space-between;margin-bottom:8px">
+          <b id="chatTitle">No conversation selected</b>
+          <span id="botBadge"></span>
+        </div>
+        <div class="thread" id="thread"><span class="help">Select a conversation in Step 2.</span></div>
+        <textarea id="msgInput" placeholder="Type your reply to the customer…" disabled></textarea>
+        <div class="row" style="margin-top:10px">
+          <button class="red" id="sendBtn" disabled title="Send this message to the customer's Messenger">Send to Messenger</button>
+          <button class="ghost hidden" id="resumeBtn" title="Let the AI assistant answer this customer again">Resume AI assistant</button>
+        </div>
+        <div class="status" id="sendStatus"></div>
+      </section>
+    </div>
+  </div>
+</main>
+
+<script>
+(function () {
+  var key = "";
+  try { key = sessionStorage.getItem("adminKey") || ""; } catch (e) {}
+  var current = null, pollTimer = null;
+  var $ = function (id) { return document.getElementById(id); };
+
+  function api(path, opts) {
+    opts = opts || {};
+    opts.headers = Object.assign({ "x-admin-key": key }, opts.headers || {});
+    return fetch(path, opts).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (d) {
+        if (!r.ok) throw new Error(d.error || ("Error " + r.status));
+        return d;
+      });
+    });
+  }
+  function esc(s) { var d = document.createElement("div"); d.textContent = s == null ? "" : String(s); return d.innerHTML; }
+  function fmt(t) { try { return new Date(t).toLocaleString(); } catch (e) { return t; } }
+
+  function login() {
+    key = $("keyInput").value.trim() || key;
+    $("loginStatus").textContent = "Checking…"; $("loginStatus").className = "status";
+    api("/admin/api/page").then(function (p) {
+      try { sessionStorage.setItem("adminKey", key); } catch (e) {}
+      $("loginCard").classList.add("hidden"); $("app").classList.remove("hidden");
+      $("pageBox").innerHTML = (p.picture ? '<img src="' + esc(p.picture) + '" alt="">' : "") +
+        '<div><b style="font-size:18px">' + esc(p.name) + '</b><br><span class="help">' + esc(p.category) + ' · Page ID ' + esc(p.id) +
+        '</span><br><span class="badge ok">✓ Connected to Messenger</span></div>';
+      loadConversations();
+    }).catch(function (e) {
+      $("loginStatus").textContent = e.message; $("loginStatus").className = "status err";
+    });
+  }
+
+  function loadConversations() {
+    $("convList").textContent = "Loading…";
+    api("/admin/api/conversations").then(function (list) {
+      if (!list.length) { $("convList").innerHTML = '<span class="help">No conversations yet.</span>'; return; }
+      $("convList").innerHTML = "";
+      list.forEach(function (c) {
+        var el = document.createElement("div");
+        el.className = "conv" + (current && current.id === c.id ? " active" : "");
+        el.innerHTML = "<b>" + esc(c.customerName) + "</b><span>" + esc(c.snippet).slice(0, 70) + "</span><br><span>" + fmt(c.updated) + "</span>";
+        el.onclick = function () { openConversation(c); };
+        $("convList").appendChild(el);
+      });
+    }).catch(function (e) { $("convList").innerHTML = '<span class="status err">' + esc(e.message) + "</span>"; });
+  }
+
+  function setBotBadge(paused) {
+    $("botBadge").innerHTML = paused ? '<span class="badge paused">AI assistant paused (admin replying)</span>' : '<span class="badge ok">AI assistant active</span>';
+    $("resumeBtn").classList.toggle("hidden", !paused);
+  }
+
+  function openConversation(c) {
+    current = c;
+    $("chatTitle").textContent = "Chat with " + c.customerName;
+    $("msgInput").disabled = false; $("sendBtn").disabled = false;
+    $("sendStatus").textContent = "";
+    setBotBadge(c.botPaused);
+    Array.prototype.forEach.call(document.querySelectorAll(".conv"), function (x) { x.classList.remove("active"); });
+    loadMessages();
+    clearInterval(pollTimer); pollTimer = setInterval(loadMessages, 4000);
+    loadConversations();
+  }
+
+  function loadMessages() {
+    if (!current) return;
+    api("/admin/api/messages?conv=" + encodeURIComponent(current.id)).then(function (msgs) {
+      var t = $("thread"); var atBottom = t.scrollTop + t.clientHeight >= t.scrollHeight - 30;
+      t.innerHTML = msgs.map(function (m) {
+        return '<div class="msg ' + (m.fromPage ? "out" : "in") + '">' + esc(m.text) + "<small>" + (m.fromPage ? "3UK Philippines" : esc(m.fromName)) + " · " + fmt(m.time) + "</small></div>";
+      }).join("") || '<span class="help">No messages.</span>';
+      if (atBottom) t.scrollTop = t.scrollHeight;
+    }).catch(function () {});
+  }
+
+  function send() {
+    var text = $("msgInput").value.trim();
+    if (!text || !current) return;
+    $("sendBtn").disabled = true; $("sendStatus").className = "status"; $("sendStatus").textContent = "Sending…";
+    api("/admin/api/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ psid: current.psid, text: text }) })
+      .then(function (d) {
+        $("sendStatus").className = "status ok";
+        $("sendStatus").textContent = "✓ Delivered to Messenger (message ID " + d.messageId + ")";
+        $("msgInput").value = ""; setBotBadge(true); loadMessages();
+        var t = $("thread"); setTimeout(function () { t.scrollTop = t.scrollHeight; }, 600);
+      })
+      .catch(function (e) { $("sendStatus").className = "status err"; $("sendStatus").textContent = "Not sent: " + e.message; })
+      .then(function () { $("sendBtn").disabled = false; });
+  }
+
+  function resume() {
+    if (!current) return;
+    api("/admin/api/resume-bot", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ psid: current.psid }) })
+      .then(function () { setBotBadge(false); $("sendStatus").className = "status ok"; $("sendStatus").textContent = "AI assistant is answering this customer again."; })
+      .catch(function (e) { $("sendStatus").className = "status err"; $("sendStatus").textContent = e.message; });
+  }
+
+  $("loginBtn").onclick = login;
+  $("keyInput").addEventListener("keydown", function (e) { if (e.key === "Enter") login(); });
+  $("refreshBtn").onclick = loadConversations;
+  $("sendBtn").onclick = send;
+  $("resumeBtn").onclick = resume;
+  if (key) login();
+})();
+</script>
+</body>
+</html>

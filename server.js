@@ -602,6 +602,99 @@ app.get("/admin/refresh-prices", async (req, res) => {
   const r = await syncPrices("manual refresh");
   res.type("text/plain").send((r.ok ? "Prices updated. " : "Prices NOT updated. ") + r.message);
 });
+// ---------------------------------------------------------------------
+// Admin Console (https://3ukph.com/admin/console)
+// Lets the page admin see the connected Facebook Page, read recent Messenger
+// conversations and send a reply from our own app UI. Protected by ADMIN_KEY,
+// sent in the "x-admin-key" header.
+// ---------------------------------------------------------------------
+function adminKeyOk(got) {
+  const want = process.env.ADMIN_KEY || "";
+  got = String(got || "");
+  return want.length >= 12 && got.length === want.length && crypto.timingSafeEqual(Buffer.from(got), Buffer.from(want));
+}
+function requireAdmin(req, res, next) {
+  if (!adminKeyOk(req.get("x-admin-key"))) return res.status(403).json({ error: "Wrong or missing admin key." });
+  next();
+}
+async function graphGet(pathAndQuery) {
+  const sep = pathAndQuery.includes("?") ? "&" : "?";
+  const r = await fetch(`https://graph.facebook.com/v21.0/${pathAndQuery}${sep}access_token=${encodeURIComponent(PAGE_ACCESS_TOKEN)}`);
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error((data.error && data.error.message) || `Facebook error ${r.status}`);
+  return data;
+}
+let cachedPageId = null;
+async function getPageInfo() {
+  const d = await graphGet("me?fields=id,name,category,picture.type(large){url}");
+  cachedPageId = d.id;
+  return { id: d.id, name: d.name, category: d.category || "", picture: d.picture && d.picture.data && d.picture.data.url };
+}
+
+app.get("/admin/console", (req, res) => res.sendFile(path.join(__dirname, "public", "admin.html")));
+
+app.get("/admin/api/page", requireAdmin, async (req, res) => {
+  try { res.json(await getPageInfo()); } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+app.get("/admin/api/conversations", requireAdmin, async (req, res) => {
+  try {
+    if (!cachedPageId) await getPageInfo();
+    const d = await graphGet("me/conversations?platform=messenger&limit=15&fields=id,updated_time,snippet,unread_count,participants");
+    const list = (d.data || []).map((c) => {
+      const people = (c.participants && c.participants.data) || [];
+      const customer = people.find((p) => p.id !== cachedPageId) || {};
+      return {
+        id: c.id, updated: c.updated_time, snippet: c.snippet || "", unread: c.unread_count || 0,
+        customerName: customer.name || "Messenger user", psid: customer.id || null,
+        botPaused: customer.id ? isPaused(customer.id) : false
+      };
+    });
+    res.json(list);
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+app.get("/admin/api/messages", requireAdmin, async (req, res) => {
+  const conv = String(req.query.conv || "");
+  if (!/^t_[\w-]+$/.test(conv)) return res.status(400).json({ error: "Bad conversation id." });
+  try {
+    if (!cachedPageId) await getPageInfo();
+    const d = await graphGet(`${conv}/messages?limit=20&fields=id,message,from,created_time`);
+    const msgs = (d.data || []).reverse().map((m) => ({
+      id: m.id, text: m.message || "(attachment)", time: m.created_time,
+      fromPage: !!(m.from && m.from.id === cachedPageId), fromName: (m.from && m.from.name) || ""
+    }));
+    res.json(msgs);
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+// Sends a message as the page admin (no bot tag, so the bot pauses in that chat
+// and doesn't talk over the admin -- same as replying from the page inbox).
+app.post("/admin/api/send", requireAdmin, async (req, res) => {
+  const psid = String((req.body && req.body.psid) || "");
+  const text = String((req.body && req.body.text) || "").trim();
+  if (!/^\d+$/.test(psid)) return res.status(400).json({ error: "Pick a conversation first." });
+  if (!text || text.length > 1900) return res.status(400).json({ error: "Message must be 1 to 1900 characters." });
+  try {
+    const r = await fetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${encodeURIComponent(PAGE_ACCESS_TOKEN)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ recipient: { id: psid }, messaging_type: "RESPONSE", message: { text } })
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) return res.status(502).json({ error: (data.error && data.error.message) || `Facebook error ${r.status}` });
+    pauseBot(psid);
+    res.json({ ok: true, messageId: data.message_id });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+app.post("/admin/api/resume-bot", requireAdmin, (req, res) => {
+  const psid = String((req.body && req.body.psid) || "");
+  if (!/^\d+$/.test(psid)) return res.status(400).json({ error: "Bad id." });
+  pausedUntil.delete(psid);
+  res.json({ ok: true });
+});
+
 // Health check for uptime monitoring
 app.get("/health", (req, res) => {
   res.send(`3UKPH Messenger bot is running. Catalog: ${listAllDestinations().length} destinations loaded.`);
