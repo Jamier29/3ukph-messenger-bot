@@ -743,6 +743,11 @@ async function handleMessagingEvent(event) {
     const customerId = event.recipient && event.recipient.id;
     const sentByBot = message.metadata === BOT_METADATA || botSentMessageIds.has(message.mid);
     const sentByConsole = adminSentIds.has(message.mid);
+    // Facebook's own Instant reply / away message (set in Meta Business Suite) also arrives
+    // as an echo. It starts with AUTO_REPLY_PREFIX, so it must not pause the bot.
+    const autoReplyPrefix = (process.env.AUTO_REPLY_PREFIX || "Salamat sa message").toLowerCase();
+    const isFbAutoReply = !!message.text && message.text.trim().toLowerCase().startsWith(autoReplyPrefix);
+    if (isFbAutoReply) return;
     if (customerId && !sentByBot && !sentByConsole) {
       recordChat(customerId, true, message.text || "(attachment)", "admin");
       pauseBot(customerId);
