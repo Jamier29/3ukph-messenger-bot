@@ -407,6 +407,31 @@ footer a{color:#fff}
 .tv-confetti{position:fixed;top:-12px;width:9px;height:14px;z-index:80;pointer-events:none;animation:tvfall linear forwards}
 @keyframes tvfall{to{transform:translateY(105vh) rotate(720deg)}}
 @media (prefers-color-scheme: dark){.tv-rank{color:var(--gold-light)}.tv-opt.ok{background:#0f3a24;color:#9ff0c2}.tv-opt.bad{background:#40121a;color:#ffb3b5}}
+
+.promo-bir{display:inline-flex;align-items:center;gap:8px;margin-left:var(--space-3);padding:2px 10px 2px 2px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.35);border-radius:999px;color:#fff;text-decoration:none;font:700 13px/18px var(--font-sans);white-space:nowrap}
+.promo-bir img{height:26px;width:auto;background:#fff;border-radius:999px;padding:1px 6px}
+.promo-bir u{color:#f8c830;text-decoration:underline;text-underline-offset:2px}
+.promo-bir:hover{background:rgba(255,255,255,.22)}
+@media (max-width:640px){.promo-bir{margin-left:0}}
+/* BIR Registration Seal Badge (RMC 38-2026) */
+.bir-chip{display:none;align-items:center;gap:8px;text-decoration:none;color:var(--ink);border:1px solid var(--hairline);border-radius:999px;padding:4px 12px 4px 4px;background:#fff;font:700 12px/16px var(--font-sans);white-space:nowrap}
+.bir-chip img{height:30px;width:auto;border-radius:999px;display:block}
+.bir-chip span small{display:block;font:500 11px/14px var(--font-sans);color:var(--ink-2,#5b6478)}
+.bir-chip:hover{border-color:#00166a}
+@media (min-width:1440px){.bir-chip{display:inline-flex}}
+.bir-hero{display:inline-flex;align-items:center;gap:14px;margin-top:var(--space-4);padding:10px 16px 10px 10px;background:#fff;border:1px solid var(--hairline);border-radius:14px;box-shadow:0 2px 10px rgba(0,22,106,.06);text-decoration:none;color:var(--ink);max-width:100%}
+.bir-hero img{height:64px;width:auto;display:block;border-radius:6px}
+.bir-hero b{display:block;font:800 15px/20px var(--font-sans);color:#00166a}
+.bir-hero span{font:500 13px/18px var(--font-sans);color:var(--ink-2,#5b6478)}
+.bir-hero:hover{border-color:#00166a}
+@media (max-width:520px){.bir-hero{flex-direction:column;align-items:flex-start}.bir-hero img{height:auto;width:100%;max-width:320px}}
+.compliance{display:grid;grid-template-columns:auto 1fr;gap:var(--space-6);align-items:center;margin-top:var(--space-8);padding:var(--space-6);background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);border-radius:16px}
+.compliance a.badge{display:block;background:#fff;border-radius:12px;padding:10px;line-height:0}
+.compliance a.badge img{width:340px;max-width:100%;height:auto}
+.compliance h4{margin:0 0 6px;color:#fff;font:800 16px/22px var(--font-sans)}
+.compliance p{margin:0 0 4px;color:#dfe4f5}
+.compliance .ver{display:inline-block;margin-top:8px;color:#f8c830;font-weight:700}
+@media (max-width:760px){.compliance{grid-template-columns:1fr}.compliance a.badge img{width:100%}}
 </style>
 </head>
 <body id="top" data-mode="land">
@@ -414,6 +439,7 @@ footer a{color:#fff}
   <span>🎁 New customer? Get <b>10% off</b> your first eSIM. Use code</span>
   <button type="button" class="promo-code" id="promoCode" title="Copy code">WELCOME10 <small>Copy</small></button>
   <span>when you order on Messenger.</span>
+  <a class="promo-bir" href="https://verify.bir.gov.ph/correspondence/0605ebb12d524393bf385d43c45ee6df" target="_blank" rel="noopener" title="Verify our BIR registration on bir.gov.ph"><img src="/bir-seal-badge.png" alt="BIR Registration Seal Badge">BIR Registered <u>Verify</u></a>
 </div></div>
 <header>
   <div class="wrap bar">
@@ -454,11 +480,15 @@ footer a{color:#fff}
         <a class="uk-btn uk-btn-secondary uk-btn-lg sea-only" href="#seafarers">For seafarers</a>
       </div>
       <ul class="trust">
-        <li>DTI-registered business</li>
+        <li>DTI &amp; BIR-registered business</li>
         <li>GCash, Maya, banks &amp; PayPal</li>
         <li>~5-min delivery</li>
         <li>Open 24/7</li>
       </ul>
+      <a class="bir-hero" href="https://verify.bir.gov.ph/correspondence/0605ebb12d524393bf385d43c45ee6df" target="_blank" rel="noopener" title="Verify our BIR registration on bir.gov.ph">
+        <img src="/bir-seal-badge.png" alt="BIR Registration Seal Badge of 3UKPH ESIM INTL E-LOAD AND SIMCARDS TRADING" width="197" height="64">
+        <div><b>BIR Registered Business</b><span>Official BIR Registration Seal Badge · Scan the QR or tap to verify</span></div>
+      </a>
     </div>
 
     <div class="scene" aria-hidden="true">
@@ -831,6 +861,7 @@ footer a{color:#fff}
     </div>
     <dl class="facts reveal">
       <div><dt>DTI Business Name No.</dt><dd>8511609</dd></div>
+      <div><dt>BIR Registration</dt><dd><a href="https://verify.bir.gov.ph/correspondence/0605ebb12d524393bf385d43c45ee6df" target="_blank" rel="noopener">Registered · RSN 044RC20260000017295</a></dd></div>
       <div><dt>Phone</dt><dd><a href="tel:+639672130757">+63 967 213 0757</a></dd></div>
       <div><dt>Email</dt><dd><a href="mailto:admin@3ukph.com">admin@3ukph.com</a></dd></div>
       <div><dt>Address</dt><dd>Taguig City, Metro Manila, Philippines</dd></div>
@@ -859,7 +890,16 @@ footer a{color:#fff}
       <div><h4>Explore</h4><ul><li><a href="#finder">Find a plan</a></li><li><a href="#seafarers">For seafarers</a></li><li><a href="#calc">Data calculator</a></li><li><a href="#reviews">Reviews</a></li><li><a href="#trivia">Crew trivia</a></li><li><a href="#faq">FAQ</a></li><li><a href="https://3ukph.com/privacy">Privacy Policy</a></li></ul></div>
       <div><h4>Contact</h4><ul><li><a href="https://www.messenger.com/t/103294518884622">Messenger: 3UK Philippines</a></li><li><a href="tel:+639672130757">+63 967 213 0757</a></li><li><a href="mailto:admin@3ukph.com">admin@3ukph.com</a></li><li>Taguig City, Metro Manila, Philippines</li></ul></div>
     </div>
-    <div class="copy"><span>© 2026 3UKPH ESIM INTL E-LOAD AND SIMCARDS TRADING</span><span>DTI-registered</span></div>
+    <div class="compliance" id="compliance">
+      <a class="badge" href="https://verify.bir.gov.ph/correspondence/0605ebb12d524393bf385d43c45ee6df" target="_blank" rel="noopener" title="Verify on bir.gov.ph"><img src="/bir-seal-badge.png" alt="BIR Registration Seal Badge, RSN 044RC20260000017295" loading="lazy" width="340" height="110"></a>
+      <div>
+        <h4>Government Compliance</h4>
+        <p><b>3UKPH ESIM INTL E-LOAD AND SIMCARDS TRADING</b> is registered with the Bureau of Internal Revenue (BIR) and the Department of Trade and Industry (DTI Business Name No. 8511609).</p>
+        <p>BIR Registration Seal Badge · RSN 044RC20260000017295</p>
+        <a class="ver" href="https://verify.bir.gov.ph/correspondence/0605ebb12d524393bf385d43c45ee6df" target="_blank" rel="noopener">Verify on bir.gov.ph &rarr;</a>
+      </div>
+    </div>
+    <div class="copy"><span>© 2026 3UKPH ESIM INTL E-LOAD AND SIMCARDS TRADING</span><span>DTI &amp; BIR-registered</span></div>
   </div>
 </footer>
 

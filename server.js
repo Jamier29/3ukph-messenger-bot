@@ -556,6 +556,8 @@ app.get("/sitemap.xml", (req, res) => res.type("application/xml").send(
   '  <url><loc>https://3ukph.com/privacy</loc><changefreq>yearly</changefreq><priority>0.3</priority></url>\n' +
   '</urlset>\n'));
 app.get("/logo.png", (req, res) => res.sendFile(path.join(__dirname, "public", "logo.png")));
+// BIR Registration Seal Badge (RMC 38-2026) shown on the website header and footer
+app.get("/bir-seal-badge.png", (req, res) => res.sendFile(path.join(__dirname, "public", "bir-seal-badge.png"), { maxAge: "7d" }));
 app.get("/favicon.png", (req, res) => res.sendFile(path.join(__dirname, "public", "favicon.png")));
 // Public plan-finder API used by the website (peso prices only, no cost data)
 app.get("/api/destinations", (req, res) => res.json(listAllDestinations()));
