@@ -22,6 +22,7 @@
   header small { display:block; opacity:.8; font-weight:400; font-size:12px; }
   main { max-width:1100px; margin:0 auto; padding:20px 16px 40px; }
   .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px; margin-bottom:16px; }
+  .msg img.media { display:block; max-width:240px; max-height:320px; border-radius:10px; margin:2px 0 4px; cursor:zoom-in; background:#e9edf5; min-height:60px; min-width:80px; }
   .msg .tr { display:block; margin-top:6px; padding-top:6px; border-top:1px dashed rgba(0,0,0,.2); font-size:13px; opacity:.85; }
   .msg.out .tr { border-top-color:rgba(255,255,255,.35); }
   .step { display:inline-block; background:var(--gold); color:var(--navy); font-weight:700; font-size:12px; border-radius:20px; padding:3px 10px; margin-bottom:6px; }
@@ -259,14 +260,38 @@
       var t = $("thread"); var atBottom = t.scrollTop + t.clientHeight >= t.scrollHeight - 30;
       t.innerHTML = msgs.map(function (m) {
         var tr = m.en ? '<span class="tr">🌐 ' + (m.fromPage && m.fromName && /admin/.test(m.fromName) ? "You wrote" : "English") + ": " + esc(m.en) + "</span>" : "";
-        return '<div class="msg ' + (m.fromPage ? "out" : "in") + '">' + esc(m.text) + tr + "<small>" + (m.fromPage ? "3UK Philippines" : esc(m.fromName)) + " · " + fmt(m.time) + "</small></div>";
+        var body = m.hasMedia
+          ? (/pdf|document/i.test(m.mediaType || "") ? '<a href="#" class="media-doc" data-id="' + esc(m.id) + '">📄 Open document</a>' : '<img class="media" data-id="' + esc(m.id) + '" alt="image" src="' + (mediaCache[m.id] || "") + '">') + (m.text && m.text !== "(image)" ? "<br>" + esc(m.text.replace(/^\(image\)\s*/, "")) : "")
+          : esc(m.text);
+        return '<div class="msg ' + (m.fromPage ? "out" : "in") + '">' + body + tr + "<small>" + (m.fromPage ? "3UK Philippines" : esc(m.fromName)) + " · " + fmt(m.time) + "</small></div>";
       }).join("") || '<span class="help">No messages.</span>';
       if (atBottom) t.scrollTop = t.scrollHeight;
+      loadMedia();
       // Offer auto-translation when the customer's latest message wasn't in English.
       var lang = null;
       for (var i = msgs.length - 1; i >= 0; i--) { if (!msgs[i].fromPage) { lang = msgs[i].lang || null; if (msgs[i].text.length > 3) break; } }
       $("trRow").classList.toggle("hidden", !lang); if (lang) $("trLang").textContent = lang;
     }).catch(function () {});
+  }
+
+  // Images in chats are fetched with the admin key, then shown from memory.
+  var mediaCache = {}, mediaLoading = {};
+  function fetchMedia(id) {
+    return fetch("/admin/api/media?psid=" + encodeURIComponent(current.psid) + "&id=" + encodeURIComponent(id), { headers: { "x-admin-key": key } })
+      .then(function (r) { if (!r.ok) throw new Error("not available"); return r.blob(); })
+      .then(function (b) { mediaCache[id] = URL.createObjectURL(b); return mediaCache[id]; });
+  }
+  function loadMedia() {
+    Array.prototype.forEach.call(document.querySelectorAll("#thread img.media"), function (img) {
+      var id = img.getAttribute("data-id");
+      img.onclick = function () { if (mediaCache[id]) window.open(mediaCache[id], "_blank"); };
+      if (mediaCache[id]) { img.src = mediaCache[id]; return; }
+      if (mediaLoading[id]) return; mediaLoading[id] = true;
+      fetchMedia(id).then(function (u) { img.src = u; }).catch(function () { img.replaceWith(document.createTextNode("(image not available)")); });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("#thread a.media-doc"), function (a) {
+      a.onclick = function (e) { e.preventDefault(); var id = a.getAttribute("data-id"); (mediaCache[id] ? Promise.resolve(mediaCache[id]) : fetchMedia(id)).then(function (u) { window.open(u, "_blank"); }).catch(function () { alert("Document not available."); }); };
+    });
   }
 
   function send() {

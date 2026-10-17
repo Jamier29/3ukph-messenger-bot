@@ -892,7 +892,7 @@ async function translateTo(text, language) {
 function recordChat(psid, fromPage, text, by, extra) {
   if (!psid) return;
   const list = chatLog.get(psid) || [];
-  const entry = { text: String(text || "").slice(0, 2000), fromPage: !!fromPage, by: by || (fromPage ? "bot" : "customer"), time: new Date().toISOString(), ...(extra || {}) };
+  const entry = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), text: String(text || "").slice(0, 2000), fromPage: !!fromPage, by: by || (fromPage ? "bot" : "customer"), time: new Date().toISOString(), ...(extra || {}) };
   list.push(entry);
   // Non-English messages get an English translation for the console (admin messages are typed in English).
   if (entry.by !== "admin" && !entry.en && !/^\(.*\)$/.test(entry.text.trim())) {
@@ -900,12 +900,81 @@ function recordChat(psid, fromPage, text, by, extra) {
       if (!t) { if (entry.by === "customer" && entry.text.trim().length > 3) customerLang.delete(psid); return; }
       entry.en = t.english; entry.lang = t.language;
       if (entry.by === "customer") customerLang.set(psid, t.language);
+      saveChatLog(psid);
     }).catch(() => {});
   }
   while (list.length > 50) list.shift();
   chatLog.delete(psid); chatLog.set(psid, list); // keep most recent last
   while (chatLog.size > 300) chatLog.delete(chatLog.keys().next().value);
+  saveChatLog(psid);
 }
+
+// Console chat history is also saved in Upstash (30 days), so restarts/updates don't erase it.
+function saveChatLog(psid) {
+  if (!(UPSTASH_URL && UPSTASH_TOKEN)) return;
+  const list = chatLog.get(psid);
+  if (!list) return;
+  const last = list[list.length - 1];
+  const score = last ? Date.parse(last.time) : Date.now();
+  redis(["SET", `chatlog:${psid}`, JSON.stringify({ list, lang: customerLang.get(psid) || null }), "EX", 30 * 24 * 3600])
+    .then(() => redis(["ZADD", "chatlog:index", score, psid]))
+    .catch((err) => console.error("[chatlog] save failed:", err.message));
+}
+async function loadChatLogs() {
+  if (!(UPSTASH_URL && UPSTASH_TOKEN)) return;
+  try {
+    const ids = (await redis(["ZREVRANGE", "chatlog:index", 0, 299])) || [];
+    for (const psid of ids.slice().reverse()) {
+      const v = await redis(["GET", `chatlog:${psid}`]).catch(() => null);
+      if (!v) continue;
+      const d = JSON.parse(v);
+      if (!chatLog.has(psid) && Array.isArray(d.list)) chatLog.set(psid, d.list);
+      if (d.lang && !customerLang.has(psid)) customerLang.set(psid, d.lang);
+    }
+    // Chats from before the console history was saved: rebuild their text from the bot's conversation memory.
+    const histKeys = (await redis(["KEYS", "hist:*"])) || [];
+    for (const k of histKeys.slice(0, 300)) {
+      const psid = k.slice(5);
+      if (chatLog.has(psid)) continue;
+      const v = await redis(["GET", k]).catch(() => null);
+      if (!v) continue;
+      const seen = Number(await redis(["GET", `seen:${psid}`]).catch(() => 0)) || Date.now();
+      const list = [];
+      for (const msg of JSON.parse(v)) {
+        let text = typeof msg.content === "string" ? msg.content
+          : Array.isArray(msg.content) ? msg.content.filter((b) => b.type === "text").map((b) => b.text).join("\n") : "";
+        text = String(text || "").trim();
+        if (!text || text === "Noted." || /^\[.*\]$/s.test(text)) continue;
+        list.push({ id: "h" + list.length, text: text.slice(0, 2000), fromPage: msg.role === "assistant", by: msg.role === "assistant" ? "bot" : "customer", time: new Date(seen).toISOString() });
+      }
+      if (list.length) { chatLog.set(psid, list.slice(-50)); saveChatLog(psid); }
+    }
+    console.log(`[chatlog] Restored ${chatLog.size} conversations for the Admin Console.`);
+  } catch (err) { console.error("[chatlog] load failed:", err.message); }
+}
+setTimeout(loadChatLogs, 500);
+
+// Image in a chat (payment screenshot, QR code) for the Admin Console: /admin/api/media?psid=...&id=...
+app.get("/admin/api/media", requireAdmin, async (req, res) => {
+  const psid = String(req.query.psid || "");
+  const entry = (chatLog.get(psid) || []).find((e) => e.id === String(req.query.id || ""));
+  const media = entry && entry.media;
+  if (!media) return res.status(404).json({ error: "No image." });
+  try {
+    let r;
+    if (media.src === "wa") {
+      const meta = await fetch(`https://graph.facebook.com/v21.0/${encodeURIComponent(media.id)}`, { headers: { Authorization: `Bearer ${WA_TOKEN}` } }).then((x) => x.json());
+      if (!meta.url) return res.status(410).json({ error: "WhatsApp no longer has this image (media expires after about 30 days)." });
+      r = await fetch(meta.url, { headers: { Authorization: `Bearer ${WA_TOKEN}` } });
+    } else {
+      r = await fetch(media.url);
+    }
+    if (!r.ok) return res.status(502).json({ error: `Couldn't load the image (${r.status}).` });
+    res.set("Content-Type", r.headers.get("content-type") || media.mime || "image/jpeg");
+    res.set("Cache-Control", "private, max-age=3600");
+    res.send(Buffer.from(await r.arrayBuffer()));
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
 
 app.get("/admin/console", (req, res) => res.sendFile(path.join(__dirname, "public", "admin.html")));
 // Installable app (PWA) files for the Admin Console: install it on Android / Windows from the console.
@@ -934,7 +1003,7 @@ app.get("/admin/api/messages", requireAdmin, async (req, res) => {
   if (!/^(wa)?\d+$/.test(psid)) return res.status(400).json({ error: "Bad conversation id." });
   const name = await getCustomerName(psid);
   res.json((chatLog.get(psid) || []).map((m, i) => ({
-    id: String(i), text: m.text, time: m.time, fromPage: m.fromPage, en: m.en || null, lang: m.lang || null,
+    id: m.id || String(i), text: m.text, time: m.time, fromPage: m.fromPage, en: m.en || null, lang: m.lang || null, hasMedia: !!m.media, mediaType: m.media ? (m.media.mime || "image") : null,
     fromName: m.fromPage ? (m.by === "admin" ? `${PAGE_NAME} (admin)` : `${PAGE_NAME} (AI assistant)`) : name
   })));
 });
@@ -1136,7 +1205,11 @@ async function handleMessagingEvent(event) {
   let text = message && message.text;
   if (!text && event.postback) text = event.postback.title || event.postback.payload;
 
-  recordChat(senderId, false, text || (message && message.attachments ? "(attachment)" : ""), "customer");
+  {
+    const att = ((message && message.attachments) || []).find((a) => a.payload && a.payload.url);
+    const media = att ? { src: "url", url: att.payload.url, mime: att.type === "image" ? "image" : att.type } : null;
+    recordChat(senderId, false, text || (message && message.attachments ? (att && att.type === "image" ? "(image)" : "(attachment)") : ""), "customer", media ? { media } : undefined);
+  }
   if (isPaused(senderId)) return; // a human is handling this chat
 
   if (!text) {
@@ -1212,7 +1285,7 @@ async function getClaudeReply(senderId, userText) {
   }
   const systemPrompt =
     "You are the AI assistant for 3UK Philippines, an eSIM business, replying to customers on " +
-    (isWa(senderId) ? "WhatsApp" : "Facebook Messenger") + ". Follow the business information below exactly. For ANY plan or price question, use the " +
+    (isWa(senderId) ? "WhatsApp (never call it Messenger)" : "Facebook Messenger") + ". Follow the business information below exactly. For ANY plan or price question, use the " +
     "search_esim_plans / get_plan tools -- never guess or remember a price. If a destination isn't found, " +
     "say so plainly. Write plain text only (no asterisks or markdown). This is a private one-to-one chat: " +
     "EVERY customer message in it comes from the same single person, so never say you are busy with or helping " +
@@ -1401,7 +1474,7 @@ async function sendText(recipientId, text) {
 async function sendImage(recipientId, url) {
   if (isWa(recipientId)) {
     const ok = await waSend(recipientId, { type: "image", image: { link: url } });
-    if (ok) recordChat(recipientId, true, "(image)", "bot");
+    if (ok) recordChat(recipientId, true, "(image)", "bot", { media: { src: "url", url } });
     return !!ok;
   }
   const data = await callSendApi({
@@ -1409,7 +1482,7 @@ async function sendImage(recipientId, url) {
     messaging_type: "RESPONSE",
     message: { attachment: { type: "image", payload: { url, is_reusable: true } } }
   });
-  if (data) recordChat(recipientId, true, "(image)", "bot");
+  if (data) recordChat(recipientId, true, "(image)", "bot", { media: { src: "url", url } });
   return !!data;
 }
 
@@ -1497,7 +1570,9 @@ async function handleWhatsAppMessage(m, profileName) {
   }
   const isImage = m.type === "image" || (m.type === "document" && /image|pdf/i.test((m.document && m.document.mime_type) || ""));
 
-  recordChat(senderId, false, text || (isImage ? "(image)" : `(${m.type})`), "customer");
+  const waMedia = (m.image && m.image.id) ? { src: "wa", id: m.image.id, mime: m.image.mime_type || "image" }
+    : (m.document && m.document.id) ? { src: "wa", id: m.document.id, mime: m.document.mime_type || "document" } : null;
+  recordChat(senderId, false, text || (isImage ? "(image)" : `(${m.type})`) + (m.image && m.image.caption ? " " + m.image.caption : ""), "customer", waMedia ? { media: waMedia } : undefined);
   if (isPaused(senderId)) return;
 
   if (!text) {
