@@ -637,7 +637,7 @@ async function runTool(name, input, senderId) {
 // A "new visit" is the first message after RETURNING_GAP_HOURS of silence; returning
 // customers and resellers then get a warm welcome-back greeting.
 // ---------------------------------------------------------------------
-const RETURNING_GAP_HOURS = Number(process.env.RETURNING_GAP_HOURS || 6);
+const RETURNING_GAP_HOURS = Number(process.env.RETURNING_GAP_HOURS || 3);
 const seenMemory = new Map();
 const customersMemory = new Map();
 const hasDb = () => !!(UPSTASH_URL && UPSTASH_TOKEN);
