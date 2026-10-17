@@ -905,6 +905,11 @@ app.post("/admin/api/reseller", requireAdmin, async (req, res) => {
           const keep = before && before.name && !/^Messenger user/.test(before.name) ? before.name : null;
           return { tier, name: keep || (app && app.name) || fbName, contact: (before && before.contact) || (app && app.contact) || "", since: before && before.since };
         })());
+    if (!before || !member || before.tier !== member.tier) {
+      appendNote(psid, member
+        ? `[ADMIN UPDATE: this person is now an APPROVED ${member.tier === "gold" ? "GOLD" : "STARTER"} reseller. Anything earlier in this chat about the application being pending no longer applies. Use reseller prices from now on: call get_plan again before confirming any plan, because prices quoted earlier were retail prices.${member.tier === "gold" ? " They can pay with the Wallet." : ""}]`
+        : "[ADMIN UPDATE: this person is no longer a reseller. Use regular retail prices from now on.]");
+    }
     if (member && (!before || before.tier !== member.tier) && req.body.notify !== false) {
       const label = member.tier === "gold" ? "Gold" : "Starter";
       await sendText(psid, `Welcome to the 3UK Philippines reseller program! 🎉 You're now a ${label} reseller. Ask me for any destination and I'll show your reseller price, the retail price, and your profit.`);
@@ -941,6 +946,7 @@ app.post("/admin/api/wallet", requireAdmin, async (req, res) => {
     if (b.notify !== false && (b.type === "topup" || b.type === "refund")) {
       await sendText(psid, `${b.type === "topup" ? "Your reseller wallet was topped up" : "A refund was added to your reseller wallet"}: +${formatPHP(Math.abs(r.entry.amount))}. Your balance is now ${formatPHP(r.balance)}. Thank you!`);
     }
+    appendNote(psid, `[ADMIN UPDATE: reseller wallet ${b.type} of ${formatPHP(Math.abs(r.entry.amount))}. Current wallet balance: ${formatPHP(r.balance)}.]`);
     // A top-up/refund closes what the admin was handling, so let the AI assistant answer this reseller again.
     if (b.type === "topup" || b.type === "refund") pausedUntil.delete(psid);
     res.json({ ok: true, ...r });
@@ -1082,7 +1088,9 @@ async function getClaudeReply(senderId, userText) {
       `${member.name ? ` (${member.name})` : ""}. Search and get_plan results include "resellerPrice" (what THEY pay us), ` +
       `"retailPrice" (our public price) and "resellerProfitIfSoldAtRetail". Quote the resellerPrice as their price, and you may ` +
       `mention the retail price and their profit. Use the resellerPrice as confirmedPrice in create_order. Discount codes don't ` +
-      `apply to reseller prices.` + (member.tier === "gold" ? ` As a Gold reseller they can pay with paymentMethod "Wallet" (deducted from their prepaid wallet).` : "")
+      `apply to reseller prices. This status is current and OVERRIDES anything said earlier in the conversation (e.g. an application ` +
+      `that was pending); if a plan was quoted earlier, call get_plan again to get the reseller price before ordering.` + (member.tier === "gold" ? ` As a Gold reseller they can pay with paymentMethod "Wallet" (deducted from their prepaid wallet). Never refuse a Wallet payment yourself -- ` +
+        `call create_order with paymentMethod "Wallet"; it checks the balance and tells you if it's too low.` : "")
     : "\n\n--- THIS CHAT ---\nThis person is NOT an approved reseller. Never quote reseller prices or reseller discounts to them.";
   // Warm welcome-back greeting on the first message of a new visit.
   let greetingContext = "";
