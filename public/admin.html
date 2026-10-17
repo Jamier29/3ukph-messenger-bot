@@ -210,7 +210,7 @@
       list.forEach(function (c) {
         var el = document.createElement("div");
         el.className = "conv" + (current && current.id === c.id ? " active" : "");
-        el.innerHTML = "<b>" + esc(c.customerName) + "</b>" + (c.reseller ? ' <span class="badge ok">' + (c.reseller === "gold" ? "Gold" : "Starter") + " reseller</span>" : "") + "<span>" + esc(c.snippet).slice(0, 70) + "</span><br><span>" + fmt(c.updated) + "</span>";
+        el.innerHTML = "<b>" + esc(c.customerName) + "</b>" + (c.channel === "WhatsApp" ? ' <span class="badge ok">WhatsApp</span>' : "") + (c.reseller ? ' <span class="badge ok">' + (c.reseller === "gold" ? "Gold" : "Starter") + " reseller</span>" : "") + "<span>" + esc(c.snippet).slice(0, 70) + "</span><br><span>" + fmt(c.updated) + "</span>";
         el.onclick = function () { openConversation(c); };
         $("convList").appendChild(el);
       });

@@ -34,6 +34,13 @@ const BOT_PAUSE_HOURS = Number(process.env.BOT_PAUSE_HOURS || 12);
 const PUBLIC_URL = (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || "").replace(/\/$/, "");
 const MAX_TOOL_ROUNDS = 5;
 
+// WhatsApp Cloud API (optional). WA_TOKEN = permanent System User token, WA_PHONE_NUMBER_ID from
+// WhatsApp > API Setup. WhatsApp customers are stored as "wa<number>", e.g. wa639171234567.
+const WA_TOKEN = (process.env.WA_TOKEN || "").trim();
+const WA_PHONE_NUMBER_ID = (process.env.WA_PHONE_NUMBER_ID || "").trim();
+const WA_VERIFY_TOKEN = (process.env.WA_VERIFY_TOKEN || process.env.VERIFY_TOKEN || "").trim();
+const isWa = (id) => /^wa\d+$/.test(String(id || ""));
+
 if (!VERIFY_TOKEN || !PAGE_ACCESS_TOKEN || !ANTHROPIC_API_KEY) {
   console.warn(
     "[startup] Missing one or more required environment variables: VERIFY_TOKEN, PAGE_ACCESS_TOKEN, ANTHROPIC_API_KEY. " +
@@ -666,7 +673,7 @@ async function recordCustomerOrder(senderId, plan) {
   } catch (err) { console.error("[visits] could not record order:", err.message); }
 }
 function realFirstName(name) {
-  if (!name || /^Messenger user/i.test(name)) return "";
+  if (!name || /^(Messenger user|WhatsApp \+)/i.test(name)) return "";
   return String(name).trim().split(/\s+/)[0];
 }
 function shortDate(iso) {
@@ -834,14 +841,14 @@ app.get("/admin/api/conversations", requireAdmin, async (req, res) => {
   const list = await Promise.all(entries.map(async ([psid, msgs]) => {
     const last = msgs[msgs.length - 1] || {};
     const member = await getResellerSafe(psid);
-    return { id: psid, psid, customerName: await getCustomerName(psid), snippet: last.text || "", updated: last.time, botPaused: isPaused(psid), reseller: member ? member.tier : null };
+    return { id: psid, psid, customerName: await getCustomerName(psid), snippet: last.text || "", updated: last.time, botPaused: isPaused(psid), reseller: member ? member.tier : null, channel: isWa(psid) ? "WhatsApp" : "Messenger" };
   }));
   res.json(list);
 });
 
 app.get("/admin/api/messages", requireAdmin, async (req, res) => {
   const psid = String(req.query.conv || "");
-  if (!/^\d+$/.test(psid)) return res.status(400).json({ error: "Bad conversation id." });
+  if (!/^(wa)?\d+$/.test(psid)) return res.status(400).json({ error: "Bad conversation id." });
   const name = await getCustomerName(psid);
   res.json((chatLog.get(psid) || []).map((m, i) => ({
     id: String(i), text: m.text, time: m.time, fromPage: m.fromPage,
@@ -854,9 +861,16 @@ app.get("/admin/api/messages", requireAdmin, async (req, res) => {
 app.post("/admin/api/send", requireAdmin, async (req, res) => {
   const psid = String((req.body && req.body.psid) || "");
   const text = String((req.body && req.body.text) || "").trim();
-  if (!/^\d+$/.test(psid)) return res.status(400).json({ error: "Pick a conversation first." });
+  if (!/^(wa)?\d+$/.test(psid)) return res.status(400).json({ error: "Pick a conversation first." });
   if (!text || text.length > 1900) return res.status(400).json({ error: "Message must be 1 to 1900 characters." });
   try {
+    if (isWa(psid)) {
+      const data = await waSend(psid, { type: "text", text: { body: text, preview_url: false } });
+      if (!data) return res.status(502).json({ error: "WhatsApp didn't accept the message. If the customer's last message was more than 24 hours ago, WhatsApp only allows template messages." });
+      pauseBot(psid);
+      recordChat(psid, true, text, "admin");
+      return res.json({ ok: true, messageId: data.messages && data.messages[0] && data.messages[0].id });
+    }
     const r = await fetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${encodeURIComponent(PAGE_ACCESS_TOKEN)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -874,13 +888,13 @@ app.post("/admin/api/send", requireAdmin, async (req, res) => {
 // --- Reseller program (approve resellers, upload private costs) ---
 app.get("/admin/api/reseller", requireAdmin, async (req, res) => {
   const psid = String(req.query.psid || "");
-  if (!/^\d+$/.test(psid)) return res.status(400).json({ error: "Bad id." });
+  if (!/^(wa)?\d+$/.test(psid)) return res.status(400).json({ error: "Bad id." });
   try { res.json({ member: await reseller.getMember(psid) }); } catch (e) { res.status(502).json({ error: e.message }); }
 });
 app.post("/admin/api/reseller", requireAdmin, async (req, res) => {
   const psid = String((req.body && req.body.psid) || "");
   const tier = String((req.body && req.body.tier) || "").toLowerCase();
-  if (!/^\d+$/.test(psid)) return res.status(400).json({ error: "Pick a conversation first." });
+  if (!/^(wa)?\d+$/.test(psid)) return res.status(400).json({ error: "Pick a conversation first." });
   if (!["starter", "gold", "none"].includes(tier)) return res.status(400).json({ error: "Tier must be starter, gold or none." });
   try {
     const before = await reseller.getMember(psid);
@@ -911,7 +925,7 @@ app.get("/admin/api/resellers", requireAdmin, async (req, res) => {
 // One reseller's wallet and full purchase history.
 app.get("/admin/api/wallet", requireAdmin, async (req, res) => {
   const psid = String(req.query.psid || "");
-  if (!/^\d+$/.test(psid)) return res.status(400).json({ error: "Bad id." });
+  if (!/^(wa)?\d+$/.test(psid)) return res.status(400).json({ error: "Bad id." });
   try {
     const [member, balance, ledger] = await Promise.all([reseller.getMember(psid), reseller.getBalance(psid), reseller.getLedger(psid, 1000)]);
     res.json({ psid, member, balance, ledger, summary: reseller.summarize(ledger) });
@@ -921,7 +935,7 @@ app.get("/admin/api/wallet", requireAdmin, async (req, res) => {
 app.post("/admin/api/wallet", requireAdmin, async (req, res) => {
   const b = req.body || {};
   const psid = String(b.psid || "");
-  if (!/^\d+$/.test(psid)) return res.status(400).json({ error: "Bad id." });
+  if (!/^(wa)?\d+$/.test(psid)) return res.status(400).json({ error: "Bad id." });
   try {
     const r = await reseller.walletTransaction(psid, { type: b.type, amountPHP: b.amount, note: b.note });
     if (b.notify !== false && (b.type === "topup" || b.type === "refund")) {
@@ -948,7 +962,7 @@ app.post("/admin/api/reseller-costs", requireAdmin, express.raw({ type: "*/*", l
 
 app.post("/admin/api/resume-bot", requireAdmin, (req, res) => {
   const psid = String((req.body && req.body.psid) || "");
-  if (!/^\d+$/.test(psid)) return res.status(400).json({ error: "Bad id." });
+  if (!/^(wa)?\d+$/.test(psid)) return res.status(400).json({ error: "Bad id." });
   pausedUntil.delete(psid);
   res.json({ ok: true });
 });
@@ -1096,8 +1110,8 @@ async function getClaudeReply(senderId, userText) {
     }
   }
   const systemPrompt =
-    "You are the AI assistant for 3UK Philippines, an eSIM business, replying to customers on Facebook " +
-    "Messenger. Follow the business information below exactly. For ANY plan or price question, use the " +
+    "You are the AI assistant for 3UK Philippines, an eSIM business, replying to customers on " +
+    (isWa(senderId) ? "WhatsApp" : "Facebook Messenger") + ". Follow the business information below exactly. For ANY plan or price question, use the " +
     "search_esim_plans / get_plan tools -- never guess or remember a price. If a destination isn't found, " +
     "say so plainly. Write plain text only (no asterisks or markdown).\n\n" + BUSINESS_INFO + resellerContext + greetingContext;
 
@@ -1209,6 +1223,15 @@ function encodeHeader(s) {
 const nameCache = new Map();
 async function getCustomerName(psid) {
   if (nameCache.has(psid)) return nameCache.get(psid);
+  if (isWa(psid)) {
+    let name = `WhatsApp +${psid.slice(2)}`;
+    try {
+      const v = UPSTASH_URL && UPSTASH_TOKEN ? await redis(["GET", `wa:name:${psid}`]) : null;
+      if (v) name = `${v} (+${psid.slice(2)})`;
+    } catch (_) { /* ignore */ }
+    nameCache.set(psid, name);
+    return name;
+  }
   let name = `Messenger user ${psid}`;
   try {
     const res = await fetch(`https://graph.facebook.com/v21.0/${psid}?fields=first_name,last_name&access_token=${encodeURIComponent(PAGE_ACCESS_TOKEN)}`);
@@ -1261,12 +1284,22 @@ async function sendText(recipientId, text) {
   }
   if (rest) chunks.push(rest);
   for (const chunk of chunks) {
+    if (isWa(recipientId)) {
+      const ok = await waSend(recipientId, { type: "text", text: { body: chunk, preview_url: false } });
+      if (ok) recordChat(recipientId, true, chunk, "bot");
+      continue;
+    }
     const sent = await callSendApi({ recipient: { id: recipientId }, messaging_type: "RESPONSE", message: { text: chunk } });
     if (sent) recordChat(recipientId, true, chunk, "bot");
   }
 }
 
 async function sendImage(recipientId, url) {
+  if (isWa(recipientId)) {
+    const ok = await waSend(recipientId, { type: "image", image: { link: url } });
+    if (ok) recordChat(recipientId, true, "(image)", "bot");
+    return !!ok;
+  }
   const data = await callSendApi({
     recipient: { id: recipientId },
     messaging_type: "RESPONSE",
@@ -1277,6 +1310,7 @@ async function sendImage(recipientId, url) {
 }
 
 async function sendTyping(recipientId) {
+  if (isWa(recipientId)) return; // WhatsApp: the typing indicator is sent with the read receipt
   try {
     await fetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${encodeURIComponent(PAGE_ACCESS_TOKEN)}`, {
       method: "POST",
@@ -1285,6 +1319,127 @@ async function sendTyping(recipientId) {
     });
   } catch (_) { /* not important */ }
 }
+
+// ---------------------------------------------------------------------
+// WhatsApp Cloud API: same AI assistant, prices, reseller program and
+// alerts as Messenger. Webhook: <PUBLIC_URL>/whatsapp/webhook
+// ---------------------------------------------------------------------
+async function waSend(recipientId, message) {
+  if (!WA_TOKEN || !WA_PHONE_NUMBER_ID) { console.error("[whatsapp] WA_TOKEN / WA_PHONE_NUMBER_ID not set."); return null; }
+  try {
+    const res = await fetch(`https://graph.facebook.com/v21.0/${WA_PHONE_NUMBER_ID}/messages`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${WA_TOKEN}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ messaging_product: "whatsapp", recipient_type: "individual", to: String(recipientId).slice(2), ...message })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { console.error("[whatsapp] send error:", res.status, JSON.stringify(data)); return null; }
+    return data;
+  } catch (err) { console.error("[whatsapp] send failed:", err.message); return null; }
+}
+
+async function waMarkReadTyping(messageId) {
+  if (!WA_TOKEN || !WA_PHONE_NUMBER_ID || !messageId) return;
+  try {
+    await fetch(`https://graph.facebook.com/v21.0/${WA_PHONE_NUMBER_ID}/messages`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${WA_TOKEN}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ messaging_product: "whatsapp", status: "read", message_id: messageId, typing_indicator: { type: "text" } })
+    });
+  } catch (_) { /* not important */ }
+}
+
+app.get("/whatsapp/webhook", (req, res) => {
+  if (req.query["hub.mode"] === "subscribe" && WA_VERIFY_TOKEN && req.query["hub.verify_token"] === WA_VERIFY_TOKEN) {
+    console.log("[whatsapp] Webhook verified.");
+    return res.status(200).send(req.query["hub.challenge"]);
+  }
+  console.warn("[whatsapp] Webhook verification failed -- token mismatch.");
+  res.sendStatus(403);
+});
+
+const waSeen = new Set(); // WhatsApp may deliver the same message twice
+app.post("/whatsapp/webhook", async (req, res) => {
+  res.sendStatus(200);
+  const body = req.body || {};
+  if (body.object !== "whatsapp_business_account") return;
+  for (const entry of body.entry || []) {
+    for (const change of entry.changes || []) {
+      const v = change.value || {};
+      const names = {};
+      (v.contacts || []).forEach((c) => { if (c.wa_id && c.profile && c.profile.name) names[c.wa_id] = c.profile.name; });
+      for (const m of v.messages || []) {
+        if (!m.id || waSeen.has(m.id)) continue;
+        waSeen.add(m.id); if (waSeen.size > 2000) waSeen.delete(waSeen.values().next().value);
+        try { await handleWhatsAppMessage(m, names[m.from]); } catch (err) { console.error("[whatsapp] Error handling message:", err); }
+      }
+    }
+  }
+});
+
+async function handleWhatsAppMessage(m, profileName) {
+  const senderId = "wa" + String(m.from || "").replace(/\D/g, "");
+  if (senderId === "wa") return;
+  if (profileName) {
+    nameCache.set(senderId, `${profileName} (+${senderId.slice(2)})`);
+    if (UPSTASH_URL && UPSTASH_TOKEN) redis(["SET", `wa:name:${senderId}`, profileName.slice(0, 80)]).catch(() => {});
+  }
+  let text = "";
+  if (m.type === "text") text = m.text && m.text.body;
+  else if (m.type === "button") text = m.button && m.button.text;
+  else if (m.type === "interactive") {
+    const i = m.interactive || {};
+    text = (i.button_reply && i.button_reply.title) || (i.list_reply && i.list_reply.title) || "";
+  }
+  const isImage = m.type === "image" || (m.type === "document" && /image|pdf/i.test((m.document && m.document.mime_type) || ""));
+
+  recordChat(senderId, false, text || (isImage ? "(image)" : `(${m.type})`), "customer");
+  if (isPaused(senderId)) return;
+
+  if (!text) {
+    if (isImage) {
+      const customer = await getCustomerName(senderId);
+      await notifyAdmin({
+        title: "Payment screenshot received (WhatsApp)",
+        message: `Customer: ${customer} sent an image (likely proof of payment). Please verify it and send the eSIM QR on WhatsApp.`,
+        tags: "receipt"
+      });
+      await sendText(senderId, "Thank you! We received your screenshot. Our team is verifying your payment now, and your eSIM QR code will be sent within 5 minutes once it's confirmed.");
+      appendNote(senderId, "[Customer sent an image, probably a payment screenshot. The admin was alerted.]");
+    } else {
+      await sendText(senderId, "Thanks for your message! Could you type your question in words? That helps me answer accurately. 😊");
+    }
+    return;
+  }
+
+  await waMarkReadTyping(m.id);
+  const reply = await getClaudeReply(senderId, text);
+  if (reply) await sendText(senderId, reply);
+}
+
+// One-time: register the WhatsApp number with a 6-digit two-step verification PIN you choose.
+// Open https://3ukph.com/admin/whatsapp-register?key=YOUR_ADMIN_KEY&pin=123456
+app.get("/admin/whatsapp-register", async (req, res) => {
+  if (!adminKeyOk(req.query.key)) return res.status(403).send("Wrong or missing key.");
+  const pin = String(req.query.pin || "");
+  if (!/^\d{6}$/.test(pin)) return res.status(400).send("Add &pin=XXXXXX (6 digits you choose, keep it safe).");
+  if (!WA_TOKEN || !WA_PHONE_NUMBER_ID) return res.status(400).send("Set WA_TOKEN and WA_PHONE_NUMBER_ID in Render first.");
+  const r = await fetch(`https://graph.facebook.com/v21.0/${WA_PHONE_NUMBER_ID}/register`, {
+    method: "POST", headers: { Authorization: `Bearer ${WA_TOKEN}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ messaging_product: "whatsapp", pin })
+  });
+  const d = await r.json().catch(() => ({}));
+  res.type("text/plain").send(r.ok ? "WhatsApp number registered ✅" : `Not registered: ${(d.error && (d.error.error_user_msg || d.error.message)) || r.status}`);
+});
+
+// Quick status check: https://3ukph.com/admin/whatsapp-status?key=YOUR_ADMIN_KEY
+app.get("/admin/whatsapp-status", async (req, res) => {
+  if (!adminKeyOk(req.query.key)) return res.status(403).send("Wrong or missing key.");
+  if (!WA_TOKEN || !WA_PHONE_NUMBER_ID) return res.type("text/plain").send("WhatsApp is OFF: set WA_TOKEN and WA_PHONE_NUMBER_ID in Render.");
+  const r = await fetch(`https://graph.facebook.com/v21.0/${WA_PHONE_NUMBER_ID}?fields=display_phone_number,verified_name,name_status,quality_rating,status`, { headers: { Authorization: `Bearer ${WA_TOKEN}` } });
+  const d = await r.json().catch(() => ({}));
+  res.type("text/plain").send(r.ok ? `WhatsApp is ON ✅\nNumber: ${d.display_phone_number}\nName: ${d.verified_name} (${d.name_status})\nStatus: ${d.status || "?"}\nQuality: ${d.quality_rating || "?"}` : `Token or ID problem: ${(d.error && d.error.message) || r.status}`);
+});
 
 startPriceSync();
 
