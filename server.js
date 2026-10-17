@@ -1104,8 +1104,8 @@ async function getClaudeReply(senderId, userText) {
   await loadHistory(senderId);
   const member = await getResellerSafe(senderId);
   const resellerContext = member
-    ? `\n\n--- THIS CHAT ---\nThis person is an APPROVED ${member.tier === "gold" ? "GOLD" : "STARTER"} RESELLER` +
-      `${member.name ? ` (${member.name})` : ""}. Search and get_plan results include "resellerPrice" (what THEY pay us), ` +
+    ? `\n\n--- THIS CHAT ---\nThe person you are chatting with is an APPROVED ${member.tier === "gold" ? "GOLD" : "STARTER"} RESELLER` +
+      `${member.name ? `; their name is ${member.name}, so address them by that name` : ""}. Search and get_plan results include "resellerPrice" (what THEY pay us), ` +
       `"retailPrice" (our public price) and "resellerProfitIfSoldAtRetail". Quote the resellerPrice as their price, and you may ` +
       `mention the retail price and their profit. Use the resellerPrice as confirmedPrice in create_order. Discount codes don't ` +
       `apply to reseller prices. This status is current and OVERRIDES anything said earlier in the conversation (e.g. an application ` +
@@ -1141,7 +1141,10 @@ async function getClaudeReply(senderId, userText) {
     "You are the AI assistant for 3UK Philippines, an eSIM business, replying to customers on " +
     (isWa(senderId) ? "WhatsApp" : "Facebook Messenger") + ". Follow the business information below exactly. For ANY plan or price question, use the " +
     "search_esim_plans / get_plan tools -- never guess or remember a price. If a destination isn't found, " +
-    "say so plainly. Write plain text only (no asterisks or markdown).\n\n" + BUSINESS_INFO + resellerContext + greetingContext;
+    "say so plainly. Write plain text only (no asterisks or markdown). This is a private one-to-one chat: " +
+    "EVERY customer message in it comes from the same single person, so never say you are busy with or helping " +
+    "someone else. Names mentioned in the chat (e.g. on a reseller application) belong to this person unless they " +
+    "clearly say the eSIM is for someone else.\n\n" + BUSINESS_INFO + resellerContext + greetingContext;
 
   const messages = getHistory(senderId).slice();
   messages.push({ role: "user", content: userText });
