@@ -696,6 +696,21 @@ function saveHistory(senderId, messages) {
     conversations.delete(conversations.keys().next().value);
   }
   conversations.set(senderId, hist);
+  // Also keep it in Upstash (14 days), so a restart or redeploy doesn't make the bot forget the chat.
+  if (UPSTASH_URL && UPSTASH_TOKEN) {
+    redis(["SET", `hist:${senderId}`, JSON.stringify(hist), "EX", 14 * 24 * 3600])
+      .catch((err) => console.error("[history] save failed:", err.message));
+  }
+}
+
+// After a restart, reload a chat's recent history from Upstash (once per chat).
+async function loadHistory(senderId) {
+  if (conversations.has(senderId) || !(UPSTASH_URL && UPSTASH_TOKEN)) return;
+  try {
+    const v = await redis(["GET", `hist:${senderId}`]);
+    const hist = v ? JSON.parse(v) : null;
+    if (Array.isArray(hist) && !conversations.has(senderId)) conversations.set(senderId, hist);
+  } catch (err) { console.error("[history] load failed:", err.message); }
 }
 
 // ---------------------------------------------------------------------
@@ -1071,7 +1086,8 @@ async function handleMessagingEvent(event) {
 }
 
 // Adds a note to the chat history so the AI knows something happened (e.g. an image was sent).
-function appendNote(senderId, note) {
+async function appendNote(senderId, note) {
+  await loadHistory(senderId);
   const hist = getHistory(senderId).slice();
   hist.push({ role: "user", content: note });
   hist.push({ role: "assistant", content: "Noted." });
@@ -1082,6 +1098,7 @@ function appendNote(senderId, note) {
 // Ask Claude for a reply, with a short tool-use loop.
 // ---------------------------------------------------------------------
 async function getClaudeReply(senderId, userText) {
+  await loadHistory(senderId);
   const member = await getResellerSafe(senderId);
   const resellerContext = member
     ? `\n\n--- THIS CHAT ---\nThis person is an APPROVED ${member.tier === "gold" ? "GOLD" : "STARTER"} RESELLER` +
