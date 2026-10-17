@@ -916,7 +916,7 @@ async function handleMessagingEvent(event) {
         message: `Customer: ${customer} sent an image (likely proof of payment). Please verify it in the page inbox and send the eSIM QR.`,
         tags: "receipt"
       });
-      await sendText(senderId, "Salamat! We received your screenshot. Our team is verifying your payment now, and your eSIM QR code will be sent within 5 minutes once it's confirmed.");
+      await sendText(senderId, "Thank you! We received your screenshot. Our team is verifying your payment now, and your eSIM QR code will be sent within 5 minutes once it's confirmed.");
       appendNote(senderId, "[Customer sent an image, probably a payment screenshot. The admin was alerted.]");
     } else if (message) {
       await sendText(senderId, "Thanks for your message! Could you type your question in words? That helps me answer accurately. 😊");
