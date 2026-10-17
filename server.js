@@ -849,6 +849,12 @@ function recordChat(psid, fromPage, text, by) {
 }
 
 app.get("/admin/console", (req, res) => res.sendFile(path.join(__dirname, "public", "admin.html")));
+// Installable app (PWA) files for the Admin Console: install it on Android / Windows from the console.
+app.use("/admin/app", express.static(path.join(__dirname, "public", "admin-app"), { maxAge: "1d" }));
+app.get("/admin/sw.js", (req, res) => {
+  res.set("Cache-Control", "no-cache");
+  res.type("application/javascript").sendFile(path.join(__dirname, "public", "admin-app", "sw.js"));
+});
 
 app.get("/admin/api/page", requireAdmin, (req, res) => {
   res.json({ id: cachedPageId || "(appears after the first message)", name: PAGE_NAME, category: "Messenger connected via pages_messaging", picture: "/logo.png" });

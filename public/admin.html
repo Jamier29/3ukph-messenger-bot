@@ -6,6 +6,12 @@
 <meta name="robots" content="noindex, nofollow">
 <title>3UK Philippines Admin Console</title>
 <link rel="icon" href="/favicon.png">
+<link rel="manifest" href="/admin/app/manifest.webmanifest">
+<meta name="theme-color" content="#0e2578">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="3UK Admin">
+<link rel="apple-touch-icon" href="/admin/app/icon-192.png">
 <style>
   :root { --navy:#0e2578; --red:#d61c28; --gold:#e8b028; --bg:#f4f6fb; --card:#fff; --line:#e3e7f0; --muted:#5b6478; --ok:#1e8e3e; }
   * { box-sizing:border-box; }
@@ -58,7 +64,11 @@
 <body>
 <header>
   <img src="/logo.png" alt="3UK Philippines logo">
-  <h1>3UK Philippines Admin Console<small>Manage Messenger conversations for the 3UK Philippines Facebook Page</small></h1>
+  <h1>3UK Philippines Admin Console<small>Messenger &amp; WhatsApp chats, resellers and wallets</small></h1>
+  <span style="margin-left:auto;display:flex;gap:8px">
+    <button class="ghost hidden" id="installBtn" title="Install the Admin Console as an app on this device" style="background:#fff">⬇ Install app</button>
+    <button class="ghost hidden" id="logoutBtn" title="Sign out on this device" style="background:#fff">Sign out</button>
+  </span>
 </header>
 
 <main>
@@ -169,7 +179,7 @@
 <script>
 (function () {
   var key = "";
-  try { key = sessionStorage.getItem("adminKey") || ""; } catch (e) {}
+  try { key = localStorage.getItem("adminKey") || sessionStorage.getItem("adminKey") || ""; } catch (e) {}
   var current = null, pollTimer = null;
   var $ = function (id) { return document.getElementById(id); };
 
@@ -190,7 +200,8 @@
     key = $("keyInput").value.trim() || key;
     $("loginStatus").textContent = "Checking…"; $("loginStatus").className = "status";
     api("/admin/api/page").then(function (p) {
-      try { sessionStorage.setItem("adminKey", key); } catch (e) {}
+      try { localStorage.setItem("adminKey", key); } catch (e) { try { sessionStorage.setItem("adminKey", key); } catch (e2) {} }
+      $("logoutBtn").classList.remove("hidden");
       $("loginCard").classList.add("hidden"); $("app").classList.remove("hidden");
       $("pageBox").innerHTML = (p.picture ? '<img src="' + esc(p.picture) + '" alt="">' : "") +
         '<div><b style="font-size:18px">' + esc(p.name) + '</b><br><span class="help">' + esc(p.category) + ' · Page ID ' + esc(p.id) +
@@ -386,6 +397,18 @@
   $("csvBtn").onclick = walletCsv;
   $("allCsvBtn").onclick = allCsv;
   $("costsBtn").onclick = uploadCosts;
+  // Installable app: register the service worker and offer an Install button.
+  if ("serviceWorker" in navigator) { navigator.serviceWorker.register("/admin/sw.js", { scope: "/admin/" }).catch(function () {}); }
+  var installEvt = null;
+  window.addEventListener("beforeinstallprompt", function (e) { e.preventDefault(); installEvt = e; $("installBtn").classList.remove("hidden"); });
+  window.addEventListener("appinstalled", function () { $("installBtn").classList.add("hidden"); });
+  $("installBtn").onclick = function () { if (!installEvt) return; installEvt.prompt(); installEvt.userChoice.then(function () { installEvt = null; $("installBtn").classList.add("hidden"); }); };
+  $("logoutBtn").onclick = function () {
+    if (!confirm("Sign out of the Admin Console on this device?")) return;
+    try { localStorage.removeItem("adminKey"); sessionStorage.removeItem("adminKey"); } catch (e) {}
+    location.reload();
+  };
+
   $("loginBtn").onclick = login;
   $("keyInput").addEventListener("keydown", function (e) { if (e.key === "Enter") login(); });
   $("refreshBtn").onclick = loadConversations;
