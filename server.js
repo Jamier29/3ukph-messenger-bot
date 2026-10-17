@@ -630,6 +630,49 @@ async function runTool(name, input, senderId) {
 // server restarts). Tool calls are kept too, so the bot remembers exactly
 // which plan (planId) the customer was looking at.
 // ---------------------------------------------------------------------
+// ---------------------------------------------------------------------
+// Returning visitors. Saved in Upstash so it survives restarts:
+//   customer:<id>  = { orders, lastOrderAt, lastPlan }  (updated on every order)
+//   seen:<id>      = last time they messaged us
+// A "new visit" is the first message after RETURNING_GAP_HOURS of silence; returning
+// customers and resellers then get a warm welcome-back greeting.
+// ---------------------------------------------------------------------
+const RETURNING_GAP_HOURS = Number(process.env.RETURNING_GAP_HOURS || 6);
+const seenMemory = new Map();
+const customersMemory = new Map();
+const hasDb = () => !!(UPSTASH_URL && UPSTASH_TOKEN);
+
+async function getAndSetLastSeen(senderId) {
+  const now = Date.now();
+  try {
+    if (!hasDb()) { const prev = seenMemory.get(senderId) || null; seenMemory.set(senderId, now); return prev; }
+    const prev = await redis(["GETSET", `seen:${senderId}`, String(now)]);
+    return prev ? Number(prev) : null;
+  } catch (err) { console.error("[visits] seen failed:", err.message); return null; }
+}
+async function getCustomerRecord(senderId) {
+  try {
+    if (!hasDb()) return customersMemory.get(senderId) || null;
+    const v = await redis(["GET", `customer:${senderId}`]);
+    return v ? JSON.parse(v) : null;
+  } catch (err) { console.error("[visits] customer lookup failed:", err.message); return null; }
+}
+async function recordCustomerOrder(senderId, plan) {
+  try {
+    const prev = (await getCustomerRecord(senderId)) || { orders: 0 };
+    const rec = { orders: (prev.orders || 0) + 1, firstOrderAt: prev.firstOrderAt || new Date().toISOString(), lastOrderAt: new Date().toISOString(), lastPlan: String(plan || "").slice(0, 120) };
+    if (!hasDb()) customersMemory.set(senderId, rec);
+    else await redis(["SET", `customer:${senderId}`, JSON.stringify(rec)]);
+  } catch (err) { console.error("[visits] could not record order:", err.message); }
+}
+function realFirstName(name) {
+  if (!name || /^Messenger user/i.test(name)) return "";
+  return String(name).trim().split(/\s+/)[0];
+}
+function shortDate(iso) {
+  return new Date(iso).toLocaleDateString("en-PH", { timeZone: "Asia/Manila", year: "numeric", month: "short", day: "numeric" });
+}
+
 const MAX_HISTORY_MESSAGES = 24;
 const MAX_USERS_TRACKED = 500;
 const conversations = new Map(); // senderId -> messages[]
@@ -1027,11 +1070,36 @@ async function getClaudeReply(senderId, userText) {
       `mention the retail price and their profit. Use the resellerPrice as confirmedPrice in create_order. Discount codes don't ` +
       `apply to reseller prices.` + (member.tier === "gold" ? ` As a Gold reseller they can pay with paymentMethod "Wallet" (deducted from their prepaid wallet).` : "")
     : "\n\n--- THIS CHAT ---\nThis person is NOT an approved reseller. Never quote reseller prices or reseller discounts to them.";
+  // Warm welcome-back greeting on the first message of a new visit.
+  let greetingContext = "";
+  const lastSeen = await getAndSetLastSeen(senderId);
+  const newVisit = !lastSeen || Date.now() - lastSeen > RETURNING_GAP_HOURS * 3600 * 1000;
+  if (newVisit) {
+    const customerRec = await getCustomerRecord(senderId);
+    if (member) {
+      const first = realFirstName(member.name) || realFirstName(await getCustomerName(senderId));
+      let bal = "";
+      if (member.tier === "gold") { try { bal = formatPHP(await reseller.getBalance(senderId)); } catch { /* ignore */ } }
+      greetingContext =
+        `\n\n--- GREETING ---\nThis is a RETURNING ${member.tier === "gold" ? "Gold" : "Starter"} reseller starting a new visit` +
+        `${first ? ` (first name: ${first})` : ""}${bal ? `; their wallet balance is ${bal}` : ""}. Begin your reply with a short, warm ` +
+        `welcome-back greeting${first ? " using their first name" : ""} that thanks them for being a 3UK Philippines reseller` +
+        `${bal ? " and mentions their wallet balance" : ""}, then answer their message. Keep the greeting to one or two lines.`;
+    } else if (customerRec && customerRec.orders > 0) {
+      const first = realFirstName(await getCustomerName(senderId));
+      greetingContext =
+        `\n\n--- GREETING ---\nThis is a RETURNING customer starting a new visit${first ? ` (first name: ${first})` : ""}: ` +
+        `${customerRec.orders} previous order(s), the last one on ${shortDate(customerRec.lastOrderAt)} (${customerRec.lastPlan}). ` +
+        `Begin your reply with a short, warm welcome-back greeting${first ? " using their first name" : ""} that thanks them for ` +
+        `coming back to 3UK Philippines (you may mention their last eSIM in a few words), then answer their message. ` +
+        `Keep the greeting to one or two lines. Do not offer a discount unless they give a valid code.`;
+    }
+  }
   const systemPrompt =
     "You are the AI assistant for 3UK Philippines, an eSIM business, replying to customers on Facebook " +
     "Messenger. Follow the business information below exactly. For ANY plan or price question, use the " +
     "search_esim_plans / get_plan tools -- never guess or remember a price. If a destination isn't found, " +
-    "say so plainly. Write plain text only (no asterisks or markdown).\n\n" + BUSINESS_INFO + resellerContext;
+    "say so plainly. Write plain text only (no asterisks or markdown).\n\n" + BUSINESS_INFO + resellerContext + greetingContext;
 
   const messages = getHistory(senderId).slice();
   messages.push({ role: "user", content: userText });
@@ -1070,6 +1138,7 @@ async function getClaudeReply(senderId, userText) {
           let result;
           try {
             result = await runTool(block.name, block.input || {}, senderId);
+            if (block.name === "create_order" && result && result.ok) recordCustomerOrder(senderId, result.plan);
           } catch (err) {
             console.error("[tool] Failed:", block.name, err);
             result = { error: "Tool failed: " + err.message };
