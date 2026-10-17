@@ -77,10 +77,14 @@ const PAYMENT_METHODS = {
 
 // PayPal (for customers abroad): they pay in USD via this payment link, where
 // they type in the amount we quote. Override with PAYPAL_LINK in Render.
-// PAYPAL_EXTRA_PERCENT (default 0) adds a % on top of the USD price to cover
+// PAYPAL_EXTRA_PERCENT (default 5) adds a % on top of the USD price to cover
 // PayPal's fees, e.g. 5 -> a $16.74 plan is quoted as $17.58.
 const PAYPAL_LINK = (process.env.PAYPAL_LINK || "https://www.paypal.com/ncp/payment/GWWNPBXR353YJ").trim();
-const PAYPAL_EXTRA_PERCENT = Math.max(0, Number(process.env.PAYPAL_EXTRA_PERCENT) || 0);
+const PAYPAL_EXTRA_PERCENT = (() => {
+  const v = String(process.env.PAYPAL_EXTRA_PERCENT ?? "").trim();
+  const n = v === "" ? 5 : Number(v); // default 5% covers PayPal's fee (about 4.6% on international payments)
+  return Number.isFinite(n) && n >= 0 && n <= 20 ? n : 5;
+})();
 
 // USD amount for a PayPal order: the peso price (after any discount) converted
 // back at our fixed rate, plus the optional PayPal fee %, rounded UP to the cent.
@@ -535,6 +539,7 @@ async function runTool(name, input, senderId) {
           paypalLink: PAYPAL_LINK,
           instructionsForYou:
             `Give the customer this PayPal link: ${PAYPAL_LINK} ` +
+            (PAYPAL_EXTRA_PERCENT ? `Mention briefly that the USD amount includes a ${PAYPAL_EXTRA_PERCENT}% PayPal processing fee. ` : "") +
             (ppQrSent ? "(a PayPal QR code image was also just sent to them) " : "") +
             `Tell them to enter exactly ${usdText} as the amount, pay with their PayPal account or a credit/debit card, ` +
             `then send a screenshot of the PayPal receipt here. Their eSIM QR code arrives after the payment is confirmed. ` +
