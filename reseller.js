@@ -133,14 +133,14 @@ async function setMember(psid, record) {
     if (redis) await redis(["DEL", `reseller:member:${psid}`]);
     return null;
   }
-  const rec = { tier: record.tier === "gold" ? "gold" : "starter", name: String(record.name || "").slice(0, 80), since: record.since || new Date().toISOString() };
+  const rec = { tier: record.tier === "gold" ? "gold" : "starter", name: String(record.name || "").slice(0, 80), contact: String(record.contact || "").slice(0, 120), since: record.since || new Date().toISOString() };
   membersMemory.set(psid, rec);
   if (redis) await redis(["SET", `reseller:member:${psid}`, JSON.stringify(rec)]);
   return rec;
 }
 
 async function listMembers() {
-  if (!redis) return [...membersMemory].map(([psid, r]) => ({ psid, ...r }));
+  if (!redis) return [...membersMemory].filter(([k]) => !k.startsWith("applicant:")).map(([psid, r]) => ({ psid, ...r }));
   const keys = (await redis(["KEYS", "reseller:member:*"])) || [];
   const out = [];
   for (const k of keys.slice(0, 200)) {
@@ -251,4 +251,16 @@ function summarize(ledger) {
   };
 }
 
-Object.assign(module.exports, { getBalance, getLedger, walletTransaction, walletOrder, logOrder, summarize });
+// Name/contact from the Messenger application, used when the admin approves.
+async function saveApplicant(psid, info) {
+  const rec = { name: String(info.name || "").slice(0, 80), contact: String(info.contact || "").slice(0, 120), at: new Date().toISOString() };
+  membersMemory.set("applicant:" + psid, rec);
+  if (redis) await redis(["SET", `reseller:applicant:${psid}`, JSON.stringify(rec)]);
+}
+async function getApplicant(psid) {
+  if (!redis) return membersMemory.get("applicant:" + psid) || null;
+  const v = await redis(["GET", `reseller:applicant:${psid}`]);
+  try { return v ? JSON.parse(v) : null; } catch { return null; }
+}
+
+Object.assign(module.exports, { saveApplicant, getApplicant, getBalance, getLedger, walletTransaction, walletOrder, logOrder, summarize });

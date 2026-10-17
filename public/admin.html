@@ -281,7 +281,7 @@
       m.forEach(function (x) {
         var el = document.createElement("div"); el.className = "member";
         el.innerHTML = "<b>" + esc(x.name || x.psid) + '</b> <span class="badge ok">' + (x.tier === "gold" ? "Gold" : "Starter") + "</span><br>" +
-          "<span>Balance <b>" + peso(x.balance) + "</b> · " + x.ordersThisMonth + " order(s) this month · " + peso(x.purchased) + " purchased in total</span>";
+          (x.contact ? "<span>" + esc(x.contact) + "</span><br>" : "") + "<span>Balance <b>" + peso(x.balance) + "</b> · " + x.ordersThisMonth + " order(s) this month · " + peso(x.purchased) + " purchased in total</span>";
         el.onclick = function () { openWallet(x.psid, x.name); };
         $("memberList").appendChild(el);
       });

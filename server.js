@@ -594,6 +594,7 @@ async function runTool(name, input, senderId) {
     case "apply_reseller": {
       const existing = await getResellerSafe(senderId);
       if (existing) return { ok: true, alreadyApproved: existing.tier, instructionsForYou: "This person is already an approved reseller. Help them with their order." };
+      await reseller.saveApplicant(senderId, input).catch((err) => console.error("[reseller] could not save applicant:", err.message));
       const customer = await getCustomerName(senderId);
       await notifyAdmin({
         title: `New reseller application (${input.tier || "Starter"})`,
@@ -841,7 +842,12 @@ app.post("/admin/api/reseller", requireAdmin, async (req, res) => {
   try {
     const before = await reseller.getMember(psid);
     const member = tier === "none" ? await reseller.setMember(psid, null)
-      : await reseller.setMember(psid, { tier, name: (before && before.name) || await getCustomerName(psid), since: before && before.since });
+      : await reseller.setMember(psid, await (async () => {
+          const app = await reseller.getApplicant(psid).catch(() => null);
+          const fbName = await getCustomerName(psid);
+          const keep = before && before.name && !/^Messenger user/.test(before.name) ? before.name : null;
+          return { tier, name: keep || (app && app.name) || fbName, contact: (before && before.contact) || (app && app.contact) || "", since: before && before.since };
+        })());
     if (member && (!before || before.tier !== member.tier) && req.body.notify !== false) {
       const label = member.tier === "gold" ? "Gold" : "Starter";
       await sendText(psid, `Welcome to the 3UK Philippines reseller program! 🎉 You're now a ${label} reseller. Ask me for any destination and I'll show your reseller price, the retail price, and your profit.`);
