@@ -845,11 +845,63 @@ function requireAdmin(req, res, next) {
 // in-memory log the server keeps of messages it receives and sends.
 let cachedPageId = process.env.PAGE_ID || null;
 const PAGE_NAME = process.env.PAGE_NAME || "3UK Philippines";
-const chatLog = new Map(); // psid -> [{ text, fromPage, by, time }]
-function recordChat(psid, fromPage, text, by) {
+const chatLog = new Map(); // psid -> [{ text, fromPage, by, time, en?, lang? }]
+const customerLang = new Map(); // psid -> last non-English language the customer wrote in
+
+// ---------------------------------------------------------------------
+// Console translation: detects the language of a message and, if it isn't
+// English or Filipino/Taglish, returns { language, english }. Otherwise null.
+// ---------------------------------------------------------------------
+const translateCache = new Map();
+async function callClaudeText(system, user, maxTokens) {
+  const r = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
+    body: JSON.stringify({ model: CLAUDE_MODEL, max_tokens: maxTokens || 800, temperature: 0, system, messages: [{ role: "user", content: user }] })
+  });
+  if (!r.ok) throw new Error(`Claude API ${r.status}`);
+  const d = await r.json();
+  return (d.content || []).filter((b) => b.type === "text").map((b) => b.text).join("").trim();
+}
+async function translateForConsole(text) {
+  const t = String(text || "").trim();
+  if (t.length < 2 || !ANTHROPIC_API_KEY) return null;
+  // Plain ASCII text with common English/Taglish words: skip the API call.
+  if (/^[\x00-\x7F₱]*$/.test(t) && /\b(the|and|you|your|is|are|i|my|for|to|of|please|thanks|hi|hello|eSIM|po|ako|ko|ng|sa|mo|yung|na|lang|pa|salamat)\b/i.test(t)) return null;
+  if (translateCache.has(t)) return translateCache.get(t);
+  const out = await callClaudeText(
+    "You detect the language of a chat message and translate it to English. Reply with JSON only: " +
+    '{"language":"<language name in English>","english":"<English translation>"}. ' +
+    'If the message is already English, Tagalog/Filipino or Taglish, reply exactly {"language":"English","english":""}.',
+    t, 900);
+  let res = null;
+  try {
+    const j = JSON.parse(out.replace(/^```(json)?|```$/g, "").trim());
+    if (j && j.language && !/^(english|tagalog|filipino|taglish)$/i.test(j.language) && j.english) res = { language: j.language, english: String(j.english).slice(0, 2000) };
+  } catch (_) { /* not JSON: ignore */ }
+  translateCache.set(t, res);
+  if (translateCache.size > 1000) translateCache.delete(translateCache.keys().next().value);
+  return res;
+}
+async function translateTo(text, language) {
+  return callClaudeText(
+    `Translate the user's message into ${language}. Keep the meaning, a friendly customer-service tone, and keep numbers, ` +
+    "peso amounts (₱), plan names, links, emails and codes exactly as written. Reply with the translation only.",
+    text, 1200);
+}
+function recordChat(psid, fromPage, text, by, extra) {
   if (!psid) return;
   const list = chatLog.get(psid) || [];
-  list.push({ text: String(text || "").slice(0, 2000), fromPage: !!fromPage, by: by || (fromPage ? "bot" : "customer"), time: new Date().toISOString() });
+  const entry = { text: String(text || "").slice(0, 2000), fromPage: !!fromPage, by: by || (fromPage ? "bot" : "customer"), time: new Date().toISOString(), ...(extra || {}) };
+  list.push(entry);
+  // Non-English messages get an English translation for the console (admin messages are typed in English).
+  if (entry.by !== "admin" && !entry.en && !/^\(.*\)$/.test(entry.text.trim())) {
+    translateForConsole(entry.text).then((t) => {
+      if (!t) { if (entry.by === "customer" && entry.text.trim().length > 3) customerLang.delete(psid); return; }
+      entry.en = t.english; entry.lang = t.language;
+      if (entry.by === "customer") customerLang.set(psid, t.language);
+    }).catch(() => {});
+  }
   while (list.length > 50) list.shift();
   chatLog.delete(psid); chatLog.set(psid, list); // keep most recent last
   while (chatLog.size > 300) chatLog.delete(chatLog.keys().next().value);
@@ -872,7 +924,7 @@ app.get("/admin/api/conversations", requireAdmin, async (req, res) => {
   const list = await Promise.all(entries.map(async ([psid, msgs]) => {
     const last = msgs[msgs.length - 1] || {};
     const member = await getResellerSafe(psid);
-    return { id: psid, psid, customerName: await getCustomerName(psid), snippet: last.text || "", updated: last.time, botPaused: isPaused(psid), reseller: member ? member.tier : null, channel: isWa(psid) ? "WhatsApp" : "Messenger" };
+    return { id: psid, psid, customerName: await getCustomerName(psid), snippet: last.text || "", updated: last.time, botPaused: isPaused(psid), reseller: member ? member.tier : null, channel: isWa(psid) ? "WhatsApp" : "Messenger", language: customerLang.get(psid) || null };
   }));
   res.json(list);
 });
@@ -882,7 +934,7 @@ app.get("/admin/api/messages", requireAdmin, async (req, res) => {
   if (!/^(wa)?\d+$/.test(psid)) return res.status(400).json({ error: "Bad conversation id." });
   const name = await getCustomerName(psid);
   res.json((chatLog.get(psid) || []).map((m, i) => ({
-    id: String(i), text: m.text, time: m.time, fromPage: m.fromPage,
+    id: String(i), text: m.text, time: m.time, fromPage: m.fromPage, en: m.en || null, lang: m.lang || null,
     fromName: m.fromPage ? (m.by === "admin" ? `${PAGE_NAME} (admin)` : `${PAGE_NAME} (AI assistant)`) : name
   })));
 });
@@ -894,25 +946,35 @@ app.post("/admin/api/send", requireAdmin, async (req, res) => {
   const text = String((req.body && req.body.text) || "").trim();
   if (!/^(wa)?\d+$/.test(psid)) return res.status(400).json({ error: "Pick a conversation first." });
   if (!text || text.length > 1900) return res.status(400).json({ error: "Message must be 1 to 1900 characters." });
+  // Optional: translate the admin's English reply into the customer's language.
+  let outText = text, extra;
+  const lang = customerLang.get(psid);
+  if (req.body.translate && lang) {
+    try {
+      outText = (await translateTo(text, lang)).slice(0, 1900) || text;
+      extra = { en: text, lang };
+    } catch (e) { return res.status(502).json({ error: "Couldn't translate right now: " + e.message + ". Untick Translate to send in English." }); }
+  }
+  const sendAndLog = () => { recordChat(psid, true, outText, "admin", extra); };
   try {
     if (isWa(psid)) {
-      const data = await waSend(psid, { type: "text", text: { body: text, preview_url: false } });
+      const data = await waSend(psid, { type: "text", text: { body: outText, preview_url: false } });
       if (!data) return res.status(502).json({ error: "WhatsApp didn't accept the message. If the customer's last message was more than 24 hours ago, WhatsApp only allows template messages." });
       pauseBot(psid);
-      recordChat(psid, true, text, "admin");
-      return res.json({ ok: true, messageId: data.messages && data.messages[0] && data.messages[0].id });
+      sendAndLog();
+      return res.json({ ok: true, sentText: outText, messageId: data.messages && data.messages[0] && data.messages[0].id });
     }
     const r = await fetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${encodeURIComponent(PAGE_ACCESS_TOKEN)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ recipient: { id: psid }, messaging_type: "RESPONSE", message: { text } })
+      body: JSON.stringify({ recipient: { id: psid }, messaging_type: "RESPONSE", message: { text: outText } })
     });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) return res.status(502).json({ error: (data.error && data.error.message) || `Facebook error ${r.status}` });
     pauseBot(psid);
     rememberAdminSent(data.message_id);
-    recordChat(psid, true, text, "admin");
-    res.json({ ok: true, messageId: data.message_id });
+    sendAndLog();
+    res.json({ ok: true, sentText: outText, messageId: data.message_id });
   } catch (e) { res.status(502).json({ error: e.message }); }
 });
 

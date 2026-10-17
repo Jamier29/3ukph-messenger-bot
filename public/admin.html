@@ -22,6 +22,8 @@
   header small { display:block; opacity:.8; font-weight:400; font-size:12px; }
   main { max-width:1100px; margin:0 auto; padding:20px 16px 40px; }
   .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px; margin-bottom:16px; }
+  .msg .tr { display:block; margin-top:6px; padding-top:6px; border-top:1px dashed rgba(0,0,0,.2); font-size:13px; opacity:.85; }
+  .msg.out .tr { border-top-color:rgba(255,255,255,.35); }
   .step { display:inline-block; background:var(--gold); color:var(--navy); font-weight:700; font-size:12px; border-radius:20px; padding:3px 10px; margin-bottom:6px; }
   h2 { font-size:17px; margin:2px 0 4px; color:var(--navy); }
   .help { color:var(--muted); font-size:13px; margin:0 0 12px; line-height:1.45; }
@@ -58,7 +60,7 @@
   .msg small { display:block; font-size:10px; opacity:.7; margin-top:3px; }
   .status { font-size:13px; margin-top:8px; }
   .status.ok { color:var(--ok); } .status.err { color:var(--red); }
-  .hidden { display:none; }
+  .hidden { display:none !important; }
 </style>
 </head>
 <body>
@@ -114,6 +116,9 @@
         </div>
         <div class="thread" id="thread"><span class="help">Select a conversation in Step 2.</span></div>
         <textarea id="msgInput" placeholder="Type your reply to the customer…" disabled></textarea>
+        <label class="hidden" id="trRow" style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:14px">
+          <input type="checkbox" id="trChk" checked> 🌐 Type in English, send in <b id="trLang"></b> (auto-translate)
+        </label>
         <div class="row" style="margin-top:10px">
           <button class="red" id="sendBtn" disabled title="Send this message to the customer's Messenger">Send to Messenger</button>
           <button class="ghost hidden" id="resumeBtn" title="Let the AI assistant answer this customer again">Resume AI assistant</button>
@@ -239,6 +244,7 @@
     $("msgInput").disabled = false; $("sendBtn").disabled = false;
     $("sendStatus").textContent = "";
     setBotBadge(c.botPaused);
+    $("sendBtn").textContent = "Send to " + (c.channel || "Messenger"); $("trRow").classList.add("hidden");
     $("resellerRow").classList.remove("hidden"); $("tierStatus").textContent = "";
     $("tierSelect").value = c.reseller || "none";
     Array.prototype.forEach.call(document.querySelectorAll(".conv"), function (x) { x.classList.remove("active"); });
@@ -252,9 +258,14 @@
     api("/admin/api/messages?conv=" + encodeURIComponent(current.id)).then(function (msgs) {
       var t = $("thread"); var atBottom = t.scrollTop + t.clientHeight >= t.scrollHeight - 30;
       t.innerHTML = msgs.map(function (m) {
-        return '<div class="msg ' + (m.fromPage ? "out" : "in") + '">' + esc(m.text) + "<small>" + (m.fromPage ? "3UK Philippines" : esc(m.fromName)) + " · " + fmt(m.time) + "</small></div>";
+        var tr = m.en ? '<span class="tr">🌐 ' + (m.fromPage && m.fromName && /admin/.test(m.fromName) ? "You wrote" : "English") + ": " + esc(m.en) + "</span>" : "";
+        return '<div class="msg ' + (m.fromPage ? "out" : "in") + '">' + esc(m.text) + tr + "<small>" + (m.fromPage ? "3UK Philippines" : esc(m.fromName)) + " · " + fmt(m.time) + "</small></div>";
       }).join("") || '<span class="help">No messages.</span>';
       if (atBottom) t.scrollTop = t.scrollHeight;
+      // Offer auto-translation when the customer's latest message wasn't in English.
+      var lang = null;
+      for (var i = msgs.length - 1; i >= 0; i--) { if (!msgs[i].fromPage) { lang = msgs[i].lang || null; if (msgs[i].text.length > 3) break; } }
+      $("trRow").classList.toggle("hidden", !lang); if (lang) $("trLang").textContent = lang;
     }).catch(function () {});
   }
 
@@ -262,10 +273,10 @@
     var text = $("msgInput").value.trim();
     if (!text || !current) return;
     $("sendBtn").disabled = true; $("sendStatus").className = "status"; $("sendStatus").textContent = "Sending…";
-    api("/admin/api/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ psid: current.psid, text: text }) })
+    api("/admin/api/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ psid: current.psid, text: text, translate: !$("trRow").classList.contains("hidden") && $("trChk").checked }) })
       .then(function (d) {
         $("sendStatus").className = "status ok";
-        $("sendStatus").textContent = "✓ Delivered to Messenger (message ID " + d.messageId + ")";
+        $("sendStatus").textContent = "✓ Delivered to " + (current.channel || "Messenger") + (d.sentText && d.sentText !== text ? " (sent as: " + d.sentText + ")" : "");
         $("msgInput").value = ""; setBotBadge(true); loadMessages();
         var t = $("thread"); setTimeout(function () { t.scrollTop = t.scrollHeight; }, 600);
       })
