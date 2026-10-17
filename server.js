@@ -269,7 +269,14 @@ function addResellerPrice(plan, member) {
   if (!plan || !member) return plan;
   const r = reseller.resellerPrice(getRawPlan(plan.planId), member.tier, getRate());
   if (!r) return { ...plan, resellerPrice: "not available for this plan -- hand off to the admin if they want it" };
-  return { ...plan, retailPrice: plan.price, resellerPrice: formatPHP(r.pricePHP), resellerPricePHP: r.pricePHP, resellerProfitIfSoldAtRetail: formatPHP(r.profitAtRetailPHP) };
+  // For an approved reseller, "price" IS their reseller price, so it is what gets quoted by default.
+  return {
+    ...plan,
+    price: formatPHP(r.pricePHP), pricePHP: r.pricePHP,
+    priceType: `${member.tier === "gold" ? "Gold" : "Starter"} reseller price (what this reseller pays)`,
+    retailPrice: plan.price,
+    resellerProfitIfSoldAtRetail: formatPHP(r.profitAtRetailPHP)
+  };
 }
 
 const TOOLS = [
@@ -1111,9 +1118,9 @@ async function getClaudeReply(senderId, userText) {
   const member = await getResellerSafe(senderId);
   const resellerContext = member
     ? `\n\n--- THIS CHAT ---\nThe person you are chatting with is an APPROVED ${member.tier === "gold" ? "GOLD" : "STARTER"} RESELLER` +
-      `${member.name ? `; their name is ${member.name}, so address them by that name` : ""}. Search and get_plan results include "resellerPrice" (what THEY pay us), ` +
-      `"retailPrice" (our public price) and "resellerProfitIfSoldAtRetail". Quote the resellerPrice as their price, and you may ` +
-      `mention the retail price and their profit. Use the resellerPrice as confirmedPrice in create_order. Discount codes don't ` +
+      `${member.name ? `; their name is ${member.name}, so address them by that name` : ""}. In search and get_plan results for this person, "price" IS their reseller price (what they pay us), ` +
+      `"retailPrice" is our public price and "resellerProfitIfSoldAtRetail" is their profit. Always quote "price" as their price ` +
+      `(you may also mention the retail price and their profit) and use it as confirmedPrice in create_order. Discount codes don't ` +
       `apply to reseller prices. This status is current and OVERRIDES anything said earlier in the conversation (e.g. an application ` +
       `that was pending); if a plan was quoted earlier, call get_plan again to get the reseller price before ordering.` + (member.tier === "gold" ? ` As a Gold reseller they can pay with paymentMethod "Wallet" (deducted from their prepaid wallet). Never refuse a Wallet payment yourself -- ` +
         `call create_order with paymentMethod "Wallet"; it checks the balance and tells you if it's too low.` : "")
@@ -1124,23 +1131,21 @@ async function getClaudeReply(senderId, userText) {
   const newVisit = !lastSeen || Date.now() - lastSeen > RETURNING_GAP_HOURS * 3600 * 1000;
   if (newVisit) {
     const customerRec = await getCustomerRecord(senderId);
+    let greeting = "";
     if (member) {
       const first = realFirstName(member.name) || realFirstName(await getCustomerName(senderId));
       let bal = "";
       if (member.tier === "gold") { try { bal = formatPHP(await reseller.getBalance(senderId)); } catch { /* ignore */ } }
-      greetingContext =
-        `\n\n--- GREETING ---\nThis is a RETURNING ${member.tier === "gold" ? "Gold" : "Starter"} reseller starting a new visit` +
-        `${first ? ` (first name: ${first})` : ""}${bal ? `; their wallet balance is ${bal}` : ""}. Begin your reply with a short, warm ` +
-        `welcome-back greeting${first ? " using their first name" : ""} that thanks them for being a 3UK Philippines reseller` +
-        `${bal ? " and mentions their wallet balance" : ""}, then answer their message. Keep the greeting to one or two lines.`;
+      greeting = `Welcome back${first ? ", " + first : ""}! 👋 Thanks for being a 3UK Philippines ${member.tier === "gold" ? "Gold" : "Starter"} reseller.` +
+        (bal ? ` Your wallet balance is ${bal}.` : "");
     } else if (customerRec && customerRec.orders > 0) {
       const first = realFirstName(await getCustomerName(senderId));
-      greetingContext =
-        `\n\n--- GREETING ---\nThis is a RETURNING customer starting a new visit${first ? ` (first name: ${first})` : ""}: ` +
-        `${customerRec.orders} previous order(s), the last one on ${shortDate(customerRec.lastOrderAt)} (${customerRec.lastPlan}). ` +
-        `Begin your reply with a short, warm welcome-back greeting${first ? " using their first name" : ""} that thanks them for ` +
-        `coming back to 3UK Philippines (you may mention their last eSIM in a few words), then answer their message. ` +
-        `Keep the greeting to one or two lines. Do not offer a discount unless they give a valid code.`;
+      greeting = `Welcome back${first ? ", " + first : ""}! 👋 So glad to see you again at 3UK Philippines.`;
+    }
+    // The greeting is sent by the code itself (so it never gets skipped); the AI then just answers.
+    if (greeting) {
+      await sendText(senderId, greeting);
+      greetingContext = `\n\n--- GREETING ---\nThis message was just sent to them: "${greeting}". Do NOT greet or welcome them again; go straight to answering their message.`;
     }
   }
   const systemPrompt =
