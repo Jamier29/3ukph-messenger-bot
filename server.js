@@ -878,6 +878,8 @@ app.post("/admin/api/wallet", requireAdmin, async (req, res) => {
     if (b.notify !== false && (b.type === "topup" || b.type === "refund")) {
       await sendText(psid, `${b.type === "topup" ? "Your reseller wallet was topped up" : "A refund was added to your reseller wallet"}: +${formatPHP(Math.abs(r.entry.amount))}. Your balance is now ${formatPHP(r.balance)}. Thank you!`);
     }
+    // A top-up/refund closes what the admin was handling, so let the AI assistant answer this reseller again.
+    if (b.type === "topup" || b.type === "refund") pausedUntil.delete(psid);
     res.json({ ok: true, ...r });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
