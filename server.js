@@ -317,6 +317,11 @@ const TOOLS = [
     }
   },
   {
+    name: "check_wallet",
+    description: "For approved resellers only: their current wallet balance and recent purchases. Use when a reseller asks about their balance, wallet, or past orders.",
+    input_schema: { type: "object", properties: {} }
+  },
+  {
     name: "apply_reseller",
     description:
       "Send a reseller application to the admin for approval (the admin gets a phone alert). Use when someone " +
@@ -440,22 +445,44 @@ async function runTool(name, input, senderId) {
 
       // Gold reseller paying from their prepaid wallet: no QR, the admin deducts it.
       if (methodKey === "wallet") {
+        const planLabel = `${plan.name} (${plan.destination}, ${plan.data}, ${plan.validityDays} days${plan.callsAndTexts ? ", with calls & texts" : ""})`;
+        let w;
+        try {
+          w = await reseller.walletOrder(senderId, { pricePHP: plan.pricePHP, plan: planLabel, retailPHP: basePlan.pricePHP, email });
+        } catch (err) {
+          console.error("[wallet] order failed:", err.message);
+          return { error: "The wallet system couldn't be reached. Ask the reseller to pay another way this time, or hand off to the admin." };
+        }
+        if (!w.ok) {
+          return {
+            error: `Not enough wallet balance: they have ${formatPHP(w.balance)} but this plan is ${plan.price}. Nothing was deducted. ` +
+              "Tell them their balance, and offer to pay this order with GCash/Maya/bank instead, or to top up their wallet (an admin confirms top-ups)."
+          };
+        }
         const customer = await getCustomerName(senderId);
         await notifyAdmin({
-          title: `${resellerTag}order: ${plan.price} from WALLET`,
+          title: `${resellerTag}order: ${plan.price} paid from WALLET`,
           message:
             `Reseller: ${customer}${member.name ? ` (${member.name})` : ""}\n` +
-            `Plan: ${plan.name} (${plan.destination}, ${plan.data}, ${plan.validityDays} days${plan.callsAndTexts ? ", with calls & texts" : ""})\n` +
-            `Deduct ${plan.price} from their wallet (retail ${basePlan.price}).\n` +
+            `Plan: ${planLabel}\n` +
+            `Deducted ${plan.price} from their wallet (retail ${basePlan.price}). New balance: ${formatPHP(w.balance)}\n` +
             `Email: ${email}\nDeliver via: ${input.deliverVia || "not specified"}\n` +
             (input.notes ? `Notes: ${input.notes}\n` : "") +
-            "👉 Check their wallet balance covers it, then send the eSIM.",
+            "👉 Already paid -- send the eSIM. If you can't fulfil it, refund it in the Admin Console.",
           tags: "moneybag"
         });
         return {
-          ok: true, plan: plan.name, price: plan.price, paymentMethod: "Reseller wallet",
-          instructionsForYou: `Tell the reseller the order is placed and ${plan.price} will be deducted from their wallet. Their eSIM QR code arrives within about 5 minutes after the admin confirms. If their wallet balance is too low, the admin will message them.`
+          ok: true, plan: plan.name, price: plan.price, paymentMethod: "Reseller wallet", walletBalanceNow: formatPHP(w.balance),
+          instructionsForYou: `Tell the reseller the order is placed and ${plan.price} was deducted from their wallet; their remaining balance is ${formatPHP(w.balance)}. Their eSIM QR code arrives within about 5 minutes.`
         };
+      }
+
+      // Reseller paying by GCash/bank/PayPal: log the purchase in their history (balance unchanged).
+      if (resellerPlan) {
+        reseller.logOrder(senderId, {
+          pricePHP: plan.pricePHP, retailPHP: basePlan.pricePHP, method: methodName, email,
+          plan: `${plan.name} (${plan.destination}, ${plan.data}, ${plan.validityDays} days${plan.callsAndTexts ? ", with calls & texts" : ""})`
+        }).catch((err) => console.error("[wallet] could not log order:", err.message));
       }
 
       // PayPal (customers abroad): quote a USD amount and give the PayPal link.
@@ -549,6 +576,19 @@ async function runTool(name, input, senderId) {
               : `The ${methodName} payment QR image was just sent to the customer. Tell them to pay exactly ${plan.price} using it and send a screenshot of the payment here. Their eSIM QR code arrives within 5 minutes after the payment is confirmed.`)
           : `The payment QR could not be sent automatically. Tell the customer the order is noted and an admin will send the ${methodName} payment QR here shortly. Amount to pay: ${plan.price}.`
       };
+    }
+
+    case "check_wallet": {
+      const member = await getResellerSafe(senderId);
+      if (!member) return { error: "This person is not an approved reseller, so they have no wallet." };
+      const [balance, ledger] = await Promise.all([reseller.getBalance(senderId), reseller.getLedger(senderId, 50)]);
+      const recent = ledger.slice(0, 5).map((e) => ({
+        date: new Date(e.at).toLocaleDateString("en-PH", { timeZone: "Asia/Manila", month: "short", day: "numeric" }),
+        type: e.type, amount: formatPHP(Math.abs(e.method === "Wallet" || e.type !== "order" ? e.amount : e.price || 0)),
+        ...(e.plan ? { plan: e.plan } : {}), ...(e.method ? { paidWith: e.method } : {}), ...(e.note ? { note: e.note } : {})
+      }));
+      return { tier: member.tier, walletBalance: formatPHP(balance), summary: reseller.summarize(ledger), recent,
+        instructionsForYou: "Tell them their balance and, if they asked, their recent purchases. To top up the wallet they pay by GCash/bank and send the screenshot; an admin adds it." };
     }
 
     case "apply_reseller": {
@@ -810,7 +850,36 @@ app.post("/admin/api/reseller", requireAdmin, async (req, res) => {
   } catch (e) { res.status(502).json({ error: e.message }); }
 });
 app.get("/admin/api/resellers", requireAdmin, async (req, res) => {
-  try { res.json({ members: await reseller.listMembers(), costs: reseller.getCostsInfo() }); } catch (e) { res.status(502).json({ error: e.message }); }
+  try {
+    const members = await reseller.listMembers();
+    const withWallets = await Promise.all(members.map(async (m) => {
+      const [balance, ledger] = await Promise.all([reseller.getBalance(m.psid), reseller.getLedger(m.psid, 1000)]);
+      return { ...m, balance, ...reseller.summarize(ledger) };
+    }));
+    res.json({ members: withWallets, costs: reseller.getCostsInfo() });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+// One reseller's wallet and full purchase history.
+app.get("/admin/api/wallet", requireAdmin, async (req, res) => {
+  const psid = String(req.query.psid || "");
+  if (!/^\d+$/.test(psid)) return res.status(400).json({ error: "Bad id." });
+  try {
+    const [member, balance, ledger] = await Promise.all([reseller.getMember(psid), reseller.getBalance(psid), reseller.getLedger(psid, 1000)]);
+    res.json({ psid, member, balance, ledger, summary: reseller.summarize(ledger) });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+// Top-up / refund / adjust a reseller's wallet.
+app.post("/admin/api/wallet", requireAdmin, async (req, res) => {
+  const b = req.body || {};
+  const psid = String(b.psid || "");
+  if (!/^\d+$/.test(psid)) return res.status(400).json({ error: "Bad id." });
+  try {
+    const r = await reseller.walletTransaction(psid, { type: b.type, amountPHP: b.amount, note: b.note });
+    if (b.notify !== false && (b.type === "topup" || b.type === "refund")) {
+      await sendText(psid, `${b.type === "topup" ? "Your reseller wallet was topped up" : "A refund was added to your reseller wallet"}: +${formatPHP(Math.abs(r.entry.amount))}. Your balance is now ${formatPHP(r.balance)}. Thank you!`);
+    }
+    res.json({ ok: true, ...r });
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 // Upload the eSIMCard "reseller_pricing" export (.xlsx) -- needs the Price (cost) and Retail Price columns.
 app.post("/admin/api/reseller-costs", requireAdmin, express.raw({ type: "*/*", limit: "20mb" }), async (req, res) => {

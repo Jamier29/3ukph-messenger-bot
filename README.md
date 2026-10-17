@@ -11,6 +11,9 @@
 - When someone asks to become a reseller, the bot explains the program, collects their details and sends you
   an alert. Approve them in the Admin Console: open their chat → *Reseller* → Starter/Gold → Save
   (they get a welcome message).
+- **Wallet & purchase tracker** (Admin Console → click a reseller): balance, top-ups, refunds, corrections, and
+  every reseller order. Wallet orders are deducted automatically (refused if the balance is too low); orders paid
+  by GCash/bank/PayPal are logged too. Download CSV for Excel. Resellers can ask the bot for their balance.
 
 ## Update (Sept 2026): pesos, ordering, payment QR codes, admin alerts
 

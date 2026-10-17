@@ -19,6 +19,12 @@
   .step { display:inline-block; background:var(--gold); color:var(--navy); font-weight:700; font-size:12px; border-radius:20px; padding:3px 10px; margin-bottom:6px; }
   h2 { font-size:17px; margin:2px 0 4px; color:var(--navy); }
   .help { color:var(--muted); font-size:13px; margin:0 0 12px; line-height:1.45; }
+  table.ledger { width:100%; border-collapse:collapse; font-size:14px; }
+  table.ledger th, table.ledger td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  table.ledger td.num, table.ledger th.num { text-align:right; white-space:nowrap; }
+  .member { padding:10px; border:1px solid var(--line); border-radius:10px; margin-bottom:8px; cursor:pointer; }
+  .member:hover { background:#f8fafc; }
+  input[type=number], input[type=text] { border:1px solid var(--line); border-radius:10px; padding:9px 10px; font:inherit; }
   select { border:1px solid var(--line); border-radius:10px; padding:9px 10px; font:inherit; background:#fff; }
   input[type=password], textarea { width:100%; border:1px solid var(--line); border-radius:10px; padding:10px 12px; font:inherit; }
   textarea { min-height:80px; resize:vertical; }
@@ -127,8 +133,35 @@
         <button class="ghost" id="costsBtn" title="Upload the eSIMCard price export">Upload prices</button>
       </div>
       <div class="status" id="costsStatus"></div>
-      <h2 style="margin-top:16px">Approved resellers</h2>
+      <h2 style="margin-top:16px">Approved resellers &amp; wallets</h2>
+      <p class="help">Click a reseller to see their wallet, add a top-up, or refund an order. Wallet orders are deducted automatically; orders paid by GCash/bank are logged too.</p>
       <div id="memberList" class="help">Loading…</div>
+      <div class="row" style="margin-top:8px"><button class="ghost" id="allCsvBtn" title="Download every reseller's purchases for Excel">⬇ Download all purchases (CSV)</button></div>
+    </section>
+
+    <!-- Wallet of one reseller -->
+    <section class="card hidden" id="walletCard">
+      <span class="step">Wallet</span>
+      <h2 id="walletTitle">Wallet</h2>
+      <div class="row" style="gap:24px;margin:6px 0 12px">
+        <div><span class="help">Balance</span><br><b id="walletBal" style="font-size:26px">₱0.00</b></div>
+        <div><span class="help">Orders this month</span><br><b id="walletMonth">0</b></div>
+        <div><span class="help">Total purchased</span><br><b id="walletTotal">₱0.00</b></div>
+        <div><span class="help">Total topped up</span><br><b id="walletTopups">₱0.00</b></div>
+      </div>
+      <div class="row">
+        <select id="txType" title="What kind of change">
+          <option value="topup">Top-up (they paid you)</option>
+          <option value="refund">Refund an order</option>
+          <option value="adjust">Correction (+ or −)</option>
+        </select>
+        <input type="number" id="txAmount" placeholder="Amount ₱" step="0.01" style="max-width:140px">
+        <input type="text" id="txNote" placeholder="Note, e.g. GCash ref 1234" style="max-width:260px">
+        <button id="txBtn" title="Save this wallet change">Save</button>
+      </div>
+      <div class="status" id="txStatus"></div>
+      <div class="row" style="margin:10px 0"><button class="ghost" id="csvBtn" title="Download this reseller's history for Excel">⬇ Download CSV</button></div>
+      <div style="overflow-x:auto"><table class="ledger" id="ledgerTable"></table></div>
     </section>
   </div>
 </main>
@@ -243,10 +276,82 @@
         ? "✓ Reseller prices ready for <b>" + c.count + "</b> plans (uploaded " + esc(fmt(c.updatedAt)) + "). Starter: cost +" + c.starterMarkupPercent + "%, Gold: cost +" + c.goldMarkupPercent + "%, reseller earns at least ₱" + c.minResellerProfit + " where possible."
         : '<span class="status err">No prices uploaded yet. Resellers can\'t see reseller prices until you upload the eSIMCard export.</span>';
       var m = d.members || [];
-      $("memberList").innerHTML = m.length ? m.map(function (x) {
-        return "<div>" + esc(x.name || x.psid) + ' <span class="badge ok">' + (x.tier === "gold" ? "Gold" : "Starter") + "</span> <span>since " + esc(fmt(x.since)) + "</span></div>";
-      }).join("") : "No approved resellers yet. Open a chat above and set Reseller to Starter or Gold.";
+      $("memberList").innerHTML = "";
+      if (!m.length) $("memberList").textContent = "No approved resellers yet. Open a chat above and set Reseller to Starter or Gold.";
+      m.forEach(function (x) {
+        var el = document.createElement("div"); el.className = "member";
+        el.innerHTML = "<b>" + esc(x.name || x.psid) + '</b> <span class="badge ok">' + (x.tier === "gold" ? "Gold" : "Starter") + "</span><br>" +
+          "<span>Balance <b>" + peso(x.balance) + "</b> · " + x.ordersThisMonth + " order(s) this month · " + peso(x.purchased) + " purchased in total</span>";
+        el.onclick = function () { openWallet(x.psid, x.name); };
+        $("memberList").appendChild(el);
+      });
     }).catch(function (e) { $("costsBox").innerHTML = '<span class="status err">' + esc(e.message) + "</span>"; });
+  }
+
+  function peso(n) { return "₱" + Number(n || 0).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  var walletPsid = null, walletName = "", walletLedger = [];
+  var TYPE_LABEL = { topup: "Top-up", order: "Order", refund: "Refund", adjust: "Correction" };
+
+  function openWallet(psid, name) {
+    walletPsid = psid; walletName = name || psid;
+    $("walletCard").classList.remove("hidden"); $("walletTitle").textContent = "Wallet: " + walletName; $("txStatus").textContent = "";
+    loadWallet();
+    setTimeout(function () { $("walletCard").scrollIntoView({ behavior: "smooth" }); }, 50);
+  }
+
+  function loadWallet() {
+    if (!walletPsid) return;
+    api("/admin/api/wallet?psid=" + encodeURIComponent(walletPsid)).then(function (d) {
+      walletLedger = d.ledger || [];
+      $("walletBal").textContent = peso(d.balance);
+      $("walletMonth").textContent = d.summary.ordersThisMonth;
+      $("walletTotal").textContent = peso(d.summary.purchased);
+      $("walletTopups").textContent = peso(d.summary.toppedUp);
+      $("ledgerTable").innerHTML = walletLedger.length
+        ? "<tr><th>Date</th><th>Type</th><th>Details</th><th class='num'>Amount</th><th class='num'>Balance after</th></tr>" +
+          walletLedger.map(function (e) {
+            var amt = e.type === "order" && e.method !== "Wallet" ? peso(e.price) + " (" + esc(e.method) + ")" : (e.amount > 0 ? "+" : "−") + peso(Math.abs(e.amount));
+            var det = esc(e.plan || "") + (e.note ? (e.plan ? "<br>" : "") + esc(e.note) : "") + (e.status ? "<br><span class='help'>" + esc(e.status) + "</span>" : "");
+            return "<tr><td>" + esc(fmt(e.at)) + "</td><td>" + (TYPE_LABEL[e.type] || e.type) + "</td><td>" + det + "</td><td class='num'>" + amt + "</td><td class='num'>" + peso(e.balanceAfter) + "</td></tr>";
+          }).join("")
+        : "<tr><td class='help'>No wallet activity yet.</td></tr>";
+    }).catch(function (e) { $("txStatus").className = "status err"; $("txStatus").textContent = e.message; });
+  }
+
+  function saveTx() {
+    var type = $("txType").value, amount = parseFloat($("txAmount").value);
+    if (!amount) { $("txStatus").className = "status err"; $("txStatus").textContent = "Enter an amount."; return; }
+    if (type !== "adjust" && amount < 0) { $("txStatus").className = "status err"; $("txStatus").textContent = "Use a positive amount."; return; }
+    if (!confirm(TYPE_LABEL[type] + " of " + peso(amount) + " for " + walletName + "?")) return;
+    $("txBtn").disabled = true; $("txStatus").className = "status"; $("txStatus").textContent = "Saving…";
+    api("/admin/api/wallet", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ psid: walletPsid, type: type, amount: amount, note: $("txNote").value }) })
+      .then(function (d) {
+        $("txStatus").className = "status ok"; $("txStatus").textContent = "✓ Saved. New balance " + peso(d.balance) + (type !== "adjust" ? ". The reseller was notified in Messenger." : ".");
+        $("txAmount").value = ""; $("txNote").value = ""; loadWallet(); loadResellers();
+      })
+      .catch(function (e) { $("txStatus").className = "status err"; $("txStatus").textContent = e.message; })
+      .then(function () { $("txBtn").disabled = false; });
+  }
+
+  function csvRows(name, ledger) {
+    return ledger.map(function (e) {
+      var paid = e.type === "order" ? (e.method === "Wallet" ? -e.amount : e.price || 0) : "";
+      return [fmt(e.at), name, TYPE_LABEL[e.type] || e.type, e.plan || "", e.method || "", paid, e.type !== "order" ? e.amount : (e.method === "Wallet" ? e.amount : 0), e.balanceAfter, e.retail || "", e.email || "", e.status || "", e.note || ""];
+    });
+  }
+  function downloadCsv(filename, rows) {
+    var head = ["Date", "Reseller", "Type", "Plan", "Paid with", "Order amount (PHP)", "Wallet change (PHP)", "Wallet balance after (PHP)", "Retail price (PHP)", "Customer email", "Status", "Note"];
+    var csv = [head].concat(rows).map(function (r) { return r.map(function (v) { v = String(v == null ? "" : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(","); }).join("\r\n");
+    var a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["\ufeff" + csv], { type: "text/csv" })); a.download = filename; a.click();
+  }
+  function walletCsv() { downloadCsv("3UKPH-wallet-" + walletName.replace(/\W+/g, "-") + ".csv", csvRows(walletName, walletLedger)); }
+  function allCsv() {
+    api("/admin/api/resellers").then(function (d) {
+      return Promise.all((d.members || []).map(function (m) {
+        return api("/admin/api/wallet?psid=" + encodeURIComponent(m.psid)).then(function (w) { return csvRows(m.name || m.psid, w.ledger || []); });
+      }));
+    }).then(function (parts) { downloadCsv("3UKPH-reseller-purchases.csv", [].concat.apply([], parts)); })
+      .catch(function (e) { alert(e.message); });
   }
 
   function saveTier() {
@@ -277,6 +382,9 @@
   }
 
   $("tierBtn").onclick = saveTier;
+  $("txBtn").onclick = saveTx;
+  $("csvBtn").onclick = walletCsv;
+  $("allCsvBtn").onclick = allCsv;
   $("costsBtn").onclick = uploadCosts;
   $("loginBtn").onclick = login;
   $("keyInput").addEventListener("keydown", function (e) { if (e.key === "Enter") login(); });

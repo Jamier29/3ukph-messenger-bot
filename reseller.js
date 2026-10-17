@@ -160,3 +160,95 @@ function getCostsInfo() {
 }
 
 module.exports = { init, costsFromWorkbook, saveCosts, resellerPrice, getMember, setMember, listMembers, getCostsInfo };
+
+// --- Wallet + purchase tracker ---------------------------------------------
+// Balance:  reseller:wallet:<psid>  (integer, in centavos, so no rounding drift)
+// History:  reseller:ledger:<psid>  (newest first, last 1000 entries)
+// Entry types: topup (+), order (wallet: -, other payment: 0), refund (+), adjust (+/-)
+const LEDGER_MAX = 1000;
+const walletMemory = new Map();
+const ledgerMemory = new Map();
+const cents = (php) => Math.round(Number(php) * 100);
+
+async function getBalance(psid) {
+  if (!redis) return (walletMemory.get(psid) || 0) / 100;
+  return (Number(await redis(["GET", `reseller:wallet:${psid}`])) || 0) / 100;
+}
+
+async function addLedger(psid, entry) {
+  const e = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), at: new Date().toISOString(), ...entry };
+  if (!redis) {
+    const l = ledgerMemory.get(psid) || [];
+    l.unshift(e); l.length = Math.min(l.length, LEDGER_MAX); ledgerMemory.set(psid, l);
+    return e;
+  }
+  await redis(["LPUSH", `reseller:ledger:${psid}`, JSON.stringify(e)]);
+  await redis(["LTRIM", `reseller:ledger:${psid}`, 0, LEDGER_MAX - 1]);
+  return e;
+}
+
+async function getLedger(psid, limit = 200) {
+  if (!redis) return (ledgerMemory.get(psid) || []).slice(0, limit);
+  const rows = (await redis(["LRANGE", `reseller:ledger:${psid}`, 0, limit - 1])) || [];
+  return rows.map((r) => { try { return JSON.parse(r); } catch { return null; } }).filter(Boolean);
+}
+
+// Changes the balance by `deltaPHP` (negative = deduct). If allowNegative is false
+// and the balance would go below zero, nothing changes and { ok:false } is returned.
+async function changeBalance(psid, deltaPHP, allowNegative) {
+  const d = cents(deltaPHP);
+  if (!redis) {
+    const now = (walletMemory.get(psid) || 0) + d;
+    if (now < 0 && !allowNegative) return { ok: false, balance: (now - d) / 100 };
+    walletMemory.set(psid, now);
+    return { ok: true, balance: now / 100 };
+  }
+  const now = Number(await redis(["INCRBY", `reseller:wallet:${psid}`, d]));
+  if (now < 0 && !allowNegative) {
+    const back = Number(await redis(["INCRBY", `reseller:wallet:${psid}`, -d]));
+    return { ok: false, balance: back / 100 };
+  }
+  return { ok: true, balance: now / 100 };
+}
+
+// Admin: top-up, refund or adjust. amountPHP > 0 adds, adjust may be negative.
+async function walletTransaction(psid, { type, amountPHP, note, by }) {
+  if (!["topup", "refund", "adjust"].includes(type)) throw new Error("Type must be topup, refund or adjust.");
+  const amt = Math.round(Number(amountPHP) * 100) / 100;
+  if (!Number.isFinite(amt) || amt === 0 || Math.abs(amt) > 1000000) throw new Error("Enter a valid amount.");
+  if (type !== "adjust" && amt < 0) throw new Error("Top-ups and refunds must be positive.");
+  const r = await changeBalance(psid, amt, true);
+  const entry = await addLedger(psid, { type, amount: amt, balanceAfter: r.balance, note: String(note || "").slice(0, 200), by: by || "admin" });
+  return { balance: r.balance, entry };
+}
+
+// Bot: a reseller order paid from the wallet. Deducts only if the balance covers it.
+async function walletOrder(psid, { pricePHP, plan, retailPHP, email }) {
+  const r = await changeBalance(psid, -pricePHP, false);
+  if (!r.ok) return { ok: false, balance: r.balance };
+  const entry = await addLedger(psid, { type: "order", method: "Wallet", amount: -pricePHP, balanceAfter: r.balance, plan, retail: retailPHP, email, status: "paid from wallet" });
+  return { ok: true, balance: r.balance, entry };
+}
+
+// Bot: a reseller order paid another way (GCash etc.) -- logged, balance unchanged.
+async function logOrder(psid, { pricePHP, plan, retailPHP, method, email }) {
+  const balance = await getBalance(psid);
+  return addLedger(psid, { type: "order", method, amount: 0, price: pricePHP, balanceAfter: balance, plan, retail: retailPHP, email, status: `awaiting ${method} payment` });
+}
+
+function summarize(ledger) {
+  const orders = ledger.filter((e) => e.type === "order");
+  const spent = (e) => (e.method === "Wallet" ? -e.amount : e.price || 0);
+  const monthKey = new Date().toISOString().slice(0, 7);
+  const month = orders.filter((e) => String(e.at).startsWith(monthKey));
+  return {
+    orders: orders.length,
+    purchased: Math.round(orders.reduce((s, e) => s + spent(e), 0) * 100) / 100,
+    ordersThisMonth: month.length,
+    purchasedThisMonth: Math.round(month.reduce((s, e) => s + spent(e), 0) * 100) / 100,
+    toppedUp: Math.round(ledger.filter((e) => e.type === "topup").reduce((s, e) => s + e.amount, 0) * 100) / 100,
+    lastOrderAt: orders[0] ? orders[0].at : null
+  };
+}
+
+Object.assign(module.exports, { getBalance, getLedger, walletTransaction, walletOrder, logOrder, summarize });
