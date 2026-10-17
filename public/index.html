@@ -888,7 +888,7 @@ footer a{color:#fff}
         <div class="tag">Global Connections. Endless Possibilities.</div>
       </div>
       <div><h4>Explore</h4><ul><li><a href="#finder">Find a plan</a></li><li><a href="#seafarers">For seafarers</a></li><li><a href="#calc">Data calculator</a></li><li><a href="#reviews">Reviews</a></li><li><a href="#trivia">Crew trivia</a></li><li><a href="#faq">FAQ</a></li><li><a href="https://3ukph.com/privacy">Privacy Policy</a></li></ul></div>
-      <div><h4>Contact</h4><ul><li><a href="https://wa.me/639347069356" data-direct="1">WhatsApp: +63 934 706 9356</a></li><li><a href="https://www.messenger.com/t/103294518884622" data-direct="1">Messenger: 3UK Philippines</a></li><li><a href="tel:+639672130757">+63 967 213 0757</a></li><li><a href="mailto:admin@3ukph.com">admin@3ukph.com</a></li><li>Taguig City, Metro Manila, Philippines</li></ul></div>
+      <div><h4>Contact</h4><ul><li><a href="https://api.whatsapp.com/send?phone=639347069356" data-direct="1">WhatsApp: +63 934 706 9356</a></li><li><a href="https://www.messenger.com/t/103294518884622" data-direct="1">Messenger: 3UK Philippines</a></li><li><a href="tel:+639672130757">+63 967 213 0757</a></li><li><a href="mailto:admin@3ukph.com">admin@3ukph.com</a></li><li>Taguig City, Metro Manila, Philippines</li></ul></div>
     </div>
     <div class="compliance" id="compliance">
       <a class="badge" href="https://verify.bir.gov.ph/correspondence/0605ebb12d524393bf385d43c45ee6df" target="_blank" rel="noopener" title="Verify on bir.gov.ph"><img src="/bir-seal-badge.png" alt="BIR Registration Seal Badge, RSN 044RC20260000017295" loading="lazy" width="340" height="110"></a>
@@ -1397,7 +1397,7 @@ renderFinder();
   <div class="cc" role="dialog" aria-modal="true" aria-labelledby="ccTitle">
     <h3 id="ccTitle">How would you like to chat?</h3>
     <p id="ccSub">Our assistant answers 24/7 and sends your eSIM in about 5 minutes.</p>
-    <a class="cc-opt cc-wa" id="ccWa" href="https://wa.me/639347069356" target="_blank" rel="noopener">
+    <a class="cc-opt cc-wa" id="ccWa" href="https://api.whatsapp.com/send?phone=639347069356" target="_blank" rel="noopener">
       <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="16" fill="#25d366"/><path fill="#fff" d="M16 6.5a9.4 9.4 0 0 0-8.1 14.2L6.6 25.5l4.9-1.3A9.4 9.4 0 1 0 16 6.5zm0 17.2c-1.5 0-2.9-.4-4.1-1.1l-.3-.2-2.9.8.8-2.8-.2-.3A7.8 7.8 0 1 1 16 23.7zm4.3-5.8c-.2-.1-1.4-.7-1.6-.8-.2-.1-.4-.1-.5.1l-.7.9c-.1.2-.3.2-.5.1a6.4 6.4 0 0 1-3.2-2.8c-.2-.4.2-.4.7-1.2.1-.1 0-.3 0-.4l-.7-1.7c-.2-.4-.4-.4-.5-.4h-.5a.9.9 0 0 0-.6.3 2.7 2.7 0 0 0-.8 2c0 1.2.9 2.3 1 2.5.1.2 1.7 2.6 4.1 3.6 1.5.7 2.1.7 2.9.6.5-.1 1.4-.6 1.6-1.1.2-.6.2-1 .1-1.1l-.4-.2z"/></svg>
       <span><b>WhatsApp</b><small>+63 934 706 9356</small></span><span class="cc-tag">Replies instantly</span>
     </a>
@@ -1410,11 +1410,11 @@ renderFinder();
 </div>
 <script>
 (function(){
-  var WA='https://wa.me/639347069356', FB='https://www.messenger.com/t/103294518884622';
+  var WA='https://api.whatsapp.com/send?phone=639347069356', FB='https://www.messenger.com/t/103294518884622';
   var back=document.getElementById('ccBack'), wa=document.getElementById('ccWa'), fb=document.getElementById('ccFb'), sub=document.getElementById('ccSub');
   var defSub=sub.textContent, lastFocus=null;
   function open(text){
-    wa.href=WA+'?text='+encodeURIComponent(text||'Hi 3UK Philippines! I would like to get an eSIM.');
+    wa.href=WA+'&text='+encodeURIComponent(text||'Hi 3UK Philippines! I would like to get an eSIM.');
     fb.href=FB;
     sub.textContent=text?'Your plan is typed in for you on WhatsApp, just press send. On Messenger, paste it (already copied).':defSub;
     lastFocus=document.activeElement; back.classList.add('open'); back.setAttribute('aria-hidden','false'); wa.focus();
