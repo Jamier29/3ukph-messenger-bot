@@ -1432,13 +1432,39 @@ app.get("/admin/whatsapp-register", async (req, res) => {
   res.type("text/plain").send(r.ok ? "WhatsApp number registered ✅" : `Not registered: ${(d.error && (d.error.error_user_msg || d.error.message)) || r.status}`);
 });
 
+// If the number still needs SMS verification:
+//   1) https://3ukph.com/admin/whatsapp-request-code?key=YOUR_ADMIN_KEY      (sends an SMS code to the SIM)
+//   2) https://3ukph.com/admin/whatsapp-verify-code?key=YOUR_ADMIN_KEY&code=123456
+app.get("/admin/whatsapp-request-code", async (req, res) => {
+  if (!adminKeyOk(req.query.key)) return res.status(403).send("Wrong or missing key.");
+  if (!WA_TOKEN || !WA_PHONE_NUMBER_ID) return res.status(400).send("Set WA_TOKEN and WA_PHONE_NUMBER_ID in Render first.");
+  const method = String(req.query.method || "SMS").toUpperCase() === "VOICE" ? "VOICE" : "SMS";
+  const r = await fetch(`https://graph.facebook.com/v21.0/${WA_PHONE_NUMBER_ID}/request_code`, {
+    method: "POST", headers: { Authorization: `Bearer ${WA_TOKEN}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ code_method: method, language: "en_US" })
+  });
+  const d = await r.json().catch(() => ({}));
+  res.type("text/plain").send(r.ok ? `Code sent by ${method} ✅ Now open /admin/whatsapp-verify-code?key=...&code=THE_CODE` : `Not sent: ${(d.error && (d.error.error_user_msg || d.error.message)) || r.status}`);
+});
+app.get("/admin/whatsapp-verify-code", async (req, res) => {
+  if (!adminKeyOk(req.query.key)) return res.status(403).send("Wrong or missing key.");
+  const code = String(req.query.code || "").replace(/\D/g, "");
+  if (!code) return res.status(400).send("Add &code=THE_CODE from the SMS.");
+  const r = await fetch(`https://graph.facebook.com/v21.0/${WA_PHONE_NUMBER_ID}/verify_code`, {
+    method: "POST", headers: { Authorization: `Bearer ${WA_TOKEN}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ code })
+  });
+  const d = await r.json().catch(() => ({}));
+  res.type("text/plain").send(r.ok ? "Number verified ✅ Now open /admin/whatsapp-register?key=...&pin=YOUR_PIN" : `Not verified: ${(d.error && (d.error.error_user_msg || d.error.message)) || r.status}`);
+});
+
 // Quick status check: https://3ukph.com/admin/whatsapp-status?key=YOUR_ADMIN_KEY
 app.get("/admin/whatsapp-status", async (req, res) => {
   if (!adminKeyOk(req.query.key)) return res.status(403).send("Wrong or missing key.");
   if (!WA_TOKEN || !WA_PHONE_NUMBER_ID) return res.type("text/plain").send("WhatsApp is OFF: set WA_TOKEN and WA_PHONE_NUMBER_ID in Render.");
-  const r = await fetch(`https://graph.facebook.com/v21.0/${WA_PHONE_NUMBER_ID}?fields=display_phone_number,verified_name,name_status,quality_rating,status`, { headers: { Authorization: `Bearer ${WA_TOKEN}` } });
+  const r = await fetch(`https://graph.facebook.com/v21.0/${WA_PHONE_NUMBER_ID}?fields=display_phone_number,verified_name,name_status,code_verification_status,quality_rating,status,platform_type`, { headers: { Authorization: `Bearer ${WA_TOKEN}` } });
   const d = await r.json().catch(() => ({}));
-  res.type("text/plain").send(r.ok ? `WhatsApp is ON ✅\nNumber: ${d.display_phone_number}\nName: ${d.verified_name} (${d.name_status})\nStatus: ${d.status || "?"}\nQuality: ${d.quality_rating || "?"}` : `Token or ID problem: ${(d.error && d.error.message) || r.status}`);
+  res.type("text/plain").send(r.ok ? `WhatsApp is ON ✅\nNumber: ${d.display_phone_number}\nName: ${d.verified_name} (${d.name_status})\nSMS verification: ${d.code_verification_status || "?"}\nStatus: ${d.status || "?"} (${d.platform_type || "?"})\nQuality: ${d.quality_rating || "?"}` : `Token or ID problem: ${(d.error && d.error.message) || r.status}`);
 });
 
 startPriceSync();
