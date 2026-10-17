@@ -19,6 +19,7 @@
 
 const ExcelJS = require("exceljs");
 const { setCatalog, getCatalogInfo } = require("./planSearch");
+const reseller = require("./reseller");
 
 const SHEET_URL = (process.env.PRICE_SHEET_URL || "").trim();
 const SYNC_MINUTES = Math.max(5, Number(process.env.PRICE_SYNC_MINUTES) || 30);
@@ -135,6 +136,11 @@ async function syncPrices(reason = "scheduled") {
     }
 
     setCatalog(plans, { rate, source: "Google Sheet (PRICE_SHEET_URL)", updatedAt: at });
+    // If the sheet also has a "Price" (your cost) column, refresh reseller prices too.
+    try {
+      const costMap = reseller.costsFromWorkbook(wb);
+      if (costMap.size >= MIN_PLANS) await reseller.saveCosts(costMap, "Google Sheet (PRICE_SHEET_URL)");
+    } catch (e) { console.error("[prices] reseller cost refresh failed:", e.message); }
     const info = getCatalogInfo();
     lastResult = {
       ok: true,

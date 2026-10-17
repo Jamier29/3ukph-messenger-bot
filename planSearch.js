@@ -172,6 +172,12 @@ function getPlan(planId) {
   return p ? describePlan(p) : null;
 }
 
+// Raw catalog entry (includes the USD retail price) -- server-side use only,
+// e.g. to look up the reseller price. Never send this to customers.
+function getRawPlan(planId) {
+  return PLANS_BY_ID.get(String(planId || "").trim().toUpperCase()) || null;
+}
+
 function listAllDestinations() {
   return DESTINATIONS;
 }
@@ -244,4 +250,4 @@ function regionSummaries() {
   return out;
 }
 
-module.exports = { regionSummaries, searchPlans, getPlan, listAllDestinations, getRate, getCatalogInfo, headlinePrices, setCatalog, formatPHP, toPHP };
+module.exports = { getRawPlan, regionSummaries, searchPlans, getPlan, listAllDestinations, getRate, getCatalogInfo, headlinePrices, setCatalog, formatPHP, toPHP };

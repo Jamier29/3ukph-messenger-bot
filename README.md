@@ -1,5 +1,17 @@
 # 3UKPH Messenger Bot — Setup Guide
 
+## Update (Oct 2026): reseller program
+
+- Approved resellers automatically see and pay their **reseller price** in Messenger:
+  Starter = cost +25% (free to join), Gold = cost +20% (₱5,000+ prepaid wallet, can pay with "Wallet").
+  If that leaves the reseller under ₱30 profit at retail, their price is lowered; on very cheap plans the
+  margin is split 50/50. Change with `RESELLER_STARTER_MARKUP`, `RESELLER_GOLD_MARKUP`, `RESELLER_MIN_PROFIT`.
+- Your **cost is never stored in this public repo**. Upload the eSIMCard `reseller_pricing` export (.xlsx) in
+  the Admin Console → *Reseller prices*. It's saved in Upstash and reloaded on restart.
+- When someone asks to become a reseller, the bot explains the program, collects their details and sends you
+  an alert. Approve them in the Admin Console: open their chat → *Reseller* → Starter/Gold → Save
+  (they get a welcome message).
+
 ## Update (Sept 2026): pesos, ordering, payment QR codes, admin alerts
 
 - Prices are quoted in pesos at a fixed 1 USD = ₱62, exact amounts (no rounding).

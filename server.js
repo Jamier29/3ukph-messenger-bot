@@ -12,9 +12,11 @@ const fs = require("fs");
 const path = require("path");
 const express = require("express");
 const { BUSINESS_INFO } = require("./business-info");
-const { searchPlans, getPlan, listAllDestinations, getRate, headlinePrices, regionSummaries, formatPHP } = require("./planSearch");
+const { getRawPlan, searchPlans, getPlan, listAllDestinations, getRate, headlinePrices, regionSummaries, formatPHP } = require("./planSearch");
 const { startPriceSync, syncPrices, getSyncStatus } = require("./priceSync");
 const crypto = require("crypto");
+const ExcelJS = require("exceljs");
+const reseller = require("./reseller");
 
 const app = express();
 app.use(express.json());
@@ -60,7 +62,8 @@ const PAYMENT_METHODS = {
   maribank: "MariBank",
   unionbank: "UnionBank",
   bpi: "BPI",
-  paypal: "PayPal"
+  paypal: "PayPal",
+  wallet: "Reseller wallet"
 };
 
 // PayPal (for customers abroad): they pay in USD via this payment link, where
@@ -108,6 +111,7 @@ function normalizePaymentMethod(input) {
   if (s.includes("mari") || s.includes("seabank")) return "maribank";
   if (s.includes("union")) return "unionbank";
   if (s.includes("bpi") || s.includes("philippineislands")) return "bpi";
+  if (s.includes("wallet")) return "wallet";
   if (s.includes("paypal") || s.includes("card") || s.includes("visa") || s.includes("mastercard")) return "paypal";
   return null;
 }
@@ -213,6 +217,9 @@ async function checkDiscountDb() {
     return { ok: false, message: `can't reach Upstash at "${redact(UPSTASH_URL)}": ${err.message}` };
   }
 }
+// Reseller program data (private costs + approved resellers) also lives in Upstash.
+reseller.init(UPSTASH_URL && UPSTASH_TOKEN ? redis : null);
+
 if (UPSTASH_URL && UPSTASH_TOKEN) {
   checkDiscountDb().then((r) => console.log(`[discount] Discount database: ${r.ok ? "✅" : "❌"} ${r.message}`));
 }
@@ -241,6 +248,19 @@ function alreadyUsedMessage(used) {
   const when = used && used.at ? ` on ${new Date(used.at).toLocaleDateString("en-PH", { timeZone: "Asia/Manila", year: "numeric", month: "short", day: "numeric" })}` : "";
   return `This customer already used a discount${used && used.code ? ` (${used.code})` : ""}${when}. ` +
     "Only one discount per customer, and codes can't be combined. Kindly explain this and quote the regular price.";
+}
+
+// ---------------------------------------------------------------------
+// Reseller helpers: approved resellers see (and pay) their reseller price.
+// ---------------------------------------------------------------------
+async function getResellerSafe(senderId) {
+  try { return await reseller.getMember(senderId); } catch (err) { console.error("[reseller] lookup failed:", err.message); return null; }
+}
+function addResellerPrice(plan, member) {
+  if (!plan || !member) return plan;
+  const r = reseller.resellerPrice(getRawPlan(plan.planId), member.tier, getRate());
+  if (!r) return { ...plan, resellerPrice: "not available for this plan -- hand off to the admin if they want it" };
+  return { ...plan, retailPrice: plan.price, resellerPrice: formatPHP(r.pricePHP), resellerPricePHP: r.pricePHP, resellerProfitIfSoldAtRetail: formatPHP(r.profitAtRetailPHP) };
 }
 
 const TOOLS = [
@@ -286,8 +306,8 @@ const TOOLS = [
       type: "object",
       properties: {
         planId: { type: "string", description: "The planId of the EXACT plan the customer confirmed (the one whose price you quoted)." },
-        confirmedPrice: { type: "string", description: "The exact peso price you last quoted the customer for this plan, from get_plan (e.g. '₱1,037.88', or the discounted price if a code was accepted)." },
-        paymentMethod: { type: "string", enum: ["GCash", "Maya", "MariBank", "UnionBank", "BPI", "PayPal"] },
+        confirmedPrice: { type: "string", description: "The exact peso price you last quoted the customer for this plan, from get_plan (e.g. '₱1,037.88', the discounted price if a code was accepted, or the resellerPrice for an approved reseller)." },
+        paymentMethod: { type: "string", enum: ["GCash", "Maya", "MariBank", "UnionBank", "BPI", "PayPal", "Wallet"], description: "\"Wallet\" is only for approved Gold resellers paying from their prepaid reseller wallet." },
         email: { type: "string", description: "Email address where the eSIM QR code should be sent." },
         deliverVia: { type: "string", enum: ["Messenger", "Email", "Both"], description: "How the customer wants the eSIM QR code." },
         discountCode: { type: "string", description: "The discount code the customer gave, if any (only one that get_plan accepted)." },
@@ -297,11 +317,29 @@ const TOOLS = [
     }
   },
   {
+    name: "apply_reseller",
+    description:
+      "Send a reseller application to the admin for approval (the admin gets a phone alert). Use when someone " +
+      "wants to become a 3UK Philippines reseller, after you've explained the program and collected their details. " +
+      "Never quote reseller prices to someone who is not yet approved.",
+    input_schema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Applicant's full name." },
+        contact: { type: "string", description: "Mobile number and/or email." },
+        sellsTo: { type: "string", description: "Who they plan to sell to, e.g. 'crewmates on my ship', 'travel agency clients'." },
+        tier: { type: "string", enum: ["Starter", "Gold"], description: "Starter (free) or Gold (₱5,000+ wallet)." },
+        notes: { type: "string", description: "Anything else useful." }
+      },
+      required: ["name", "contact"]
+    }
+  },
+  {
     name: "handoff_to_human",
     description:
       "Alert the page admin to take over this chat (the admin gets a phone notification). Use when the " +
-      "customer asks for a person/admin, for payment problems, refunds, complaints, reseller/bulk " +
-      "inquiries, or anything you're unsure about. The bot then stays quiet in this chat for a while.",
+      "customer asks for a person/admin, for payment problems, refunds, complaints, bulk/manning-agency " +
+      "orders, or anything you're unsure about. The bot then stays quiet in this chat for a while.",
     input_schema: {
       type: "object",
       properties: {
@@ -315,12 +353,21 @@ const TOOLS = [
 
 async function runTool(name, input, senderId) {
   switch (name) {
-    case "search_esim_plans":
-      return searchPlans(input || {});
+    case "search_esim_plans": {
+      const result = searchPlans(input || {});
+      const member = await getResellerSafe(senderId);
+      if (member && Array.isArray(result.plans)) result.plans = result.plans.map((p) => addResellerPrice(p, member));
+      return result;
+    }
 
     case "get_plan": {
       const plan = getPlan(input.planId);
       if (!plan) return { error: "No plan with that planId. Search again." };
+      const member = await getResellerSafe(senderId);
+      if (member) {
+        const rp = addResellerPrice(plan, member);
+        return input.discountCode ? { ...rp, discountError: "Discount codes are for retail customers and don't apply to reseller prices." } : rp;
+      }
       if (input.discountCode) {
         try {
           const used = await getUsedDiscount(senderId);
@@ -340,11 +387,23 @@ async function runTool(name, input, senderId) {
       const email = String(input.email || "").trim();
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { error: "That email looks invalid. Ask the customer to re-type it." };
 
+      // Approved resellers pay their reseller price (no discount codes on top).
+      const member = await getResellerSafe(senderId);
+      let resellerPlan = null;
+      if (member) {
+        const r = reseller.resellerPrice(getRawPlan(basePlan.planId), member.tier, getRate());
+        if (r) resellerPlan = { ...basePlan, regularPrice: basePlan.price, price: formatPHP(r.pricePHP), pricePHP: r.pricePHP };
+      }
+      if (methodKey === "wallet" && !(member && member.tier === "gold" && resellerPlan)) {
+        return { error: "Wallet payment is only for approved Gold resellers. Ask for another payment method." };
+      }
+      const resellerTag = resellerPlan ? `RESELLER (${member.tier === "gold" ? "Gold" : "Starter"}) ` : "";
+
       // Safety check: the plan being ordered must cost what the customer was quoted.
       // Catches a wrong planId (several plans share a name). Done before any side effects.
       const quoted = priceNumber(input.confirmedPrice);
-      const expected = applyDiscount(basePlan, input.discountCode);
-      const candidates = [expected.pricePHP, basePlan.pricePHP].map((n) => Math.round(n * 100) / 100);
+      const expected = resellerPlan || applyDiscount(basePlan, input.discountCode);
+      const candidates = (resellerPlan ? [resellerPlan.pricePHP] : [expected.pricePHP, basePlan.pricePHP]).map((n) => Math.round(n * 100) / 100);
       if (quoted === null || !candidates.includes(quoted)) {
         console.warn(`[order] price mismatch: planId ${input.planId} costs ${expected.price}, bot quoted ${input.confirmedPrice}`);
         return {
@@ -357,9 +416,11 @@ async function runTool(name, input, senderId) {
       }
 
       // Discount: only one per customer, ever. Record it now (atomically) so it can't be used twice.
-      let plan = applyDiscount(basePlan, input.discountCode);
-      let discountNote = "";
-      if (plan.discountCode) {
+      let plan = resellerPlan || applyDiscount(basePlan, input.discountCode);
+      let discountNote = resellerPlan ? `Reseller price (retail ${basePlan.price}).\n` : "";
+      if (resellerPlan) {
+        // no discount codes for resellers
+      } else if (plan.discountCode) {
         try {
           const ok = await claimDiscount(senderId, { code: plan.discountCode, planId: plan.planId, price: plan.price, at: Date.now() });
           if (!ok) {
@@ -377,6 +438,26 @@ async function runTool(name, input, senderId) {
 
       const methodName = PAYMENT_METHODS[methodKey];
 
+      // Gold reseller paying from their prepaid wallet: no QR, the admin deducts it.
+      if (methodKey === "wallet") {
+        const customer = await getCustomerName(senderId);
+        await notifyAdmin({
+          title: `${resellerTag}order: ${plan.price} from WALLET`,
+          message:
+            `Reseller: ${customer}${member.name ? ` (${member.name})` : ""}\n` +
+            `Plan: ${plan.name} (${plan.destination}, ${plan.data}, ${plan.validityDays} days${plan.callsAndTexts ? ", with calls & texts" : ""})\n` +
+            `Deduct ${plan.price} from their wallet (retail ${basePlan.price}).\n` +
+            `Email: ${email}\nDeliver via: ${input.deliverVia || "not specified"}\n` +
+            (input.notes ? `Notes: ${input.notes}\n` : "") +
+            "👉 Check their wallet balance covers it, then send the eSIM.",
+          tags: "moneybag"
+        });
+        return {
+          ok: true, plan: plan.name, price: plan.price, paymentMethod: "Reseller wallet",
+          instructionsForYou: `Tell the reseller the order is placed and ${plan.price} will be deducted from their wallet. Their eSIM QR code arrives within about 5 minutes after the admin confirms. If their wallet balance is too low, the admin will message them.`
+        };
+      }
+
       // PayPal (customers abroad): quote a USD amount and give the PayPal link.
       if (methodKey === "paypal") {
         const usd = paypalUsdAmount(plan.pricePHP);
@@ -387,7 +468,7 @@ async function runTool(name, input, senderId) {
 
         const customer = await getCustomerName(senderId);
         await notifyAdmin({
-          title: `New order: ${usdText} via PayPal`,
+          title: `New ${resellerTag}order: ${usdText} via PayPal`,
           message:
             `Customer: ${customer}\n` +
             `Plan: ${plan.name} (${plan.destination}, ${plan.data}, ${plan.validityDays} days${plan.callsAndTexts ? ", with calls & texts" : ""})\n` +
@@ -435,7 +516,7 @@ async function runTool(name, input, senderId) {
 
       const customer = await getCustomerName(senderId);
       await notifyAdmin({
-        title: `New order: ${plan.price} via ${methodName}`,
+        title: `New ${resellerTag}order: ${plan.price} via ${methodName}`,
         message:
           `Customer: ${customer}\n` +
           `Plan: ${plan.name} (${plan.destination}, ${plan.data}, ${plan.validityDays} days${plan.callsAndTexts ? ", with calls & texts" : ""})\n` +
@@ -468,6 +549,23 @@ async function runTool(name, input, senderId) {
               : `The ${methodName} payment QR image was just sent to the customer. Tell them to pay exactly ${plan.price} using it and send a screenshot of the payment here. Their eSIM QR code arrives within 5 minutes after the payment is confirmed.`)
           : `The payment QR could not be sent automatically. Tell the customer the order is noted and an admin will send the ${methodName} payment QR here shortly. Amount to pay: ${plan.price}.`
       };
+    }
+
+    case "apply_reseller": {
+      const existing = await getResellerSafe(senderId);
+      if (existing) return { ok: true, alreadyApproved: existing.tier, instructionsForYou: "This person is already an approved reseller. Help them with their order." };
+      const customer = await getCustomerName(senderId);
+      await notifyAdmin({
+        title: `New reseller application (${input.tier || "Starter"})`,
+        message:
+          `Facebook name: ${customer}\nName: ${input.name}\nContact: ${input.contact}\n` +
+          (input.sellsTo ? `Sells to: ${input.sellsTo}\n` : "") +
+          (input.notes ? `Notes: ${input.notes}\n` : "") +
+          `\n👉 To approve: open ${PUBLIC_URL || "https://3ukph.com"}/admin/console, open this chat, and set Reseller to Starter or Gold.`,
+        tags: "handshake"
+      });
+      appendNote(senderId, `[Reseller application sent to the admin: ${input.name}, ${input.tier || "Starter"}.]`);
+      return { ok: true, instructionsForYou: "Tell them their reseller application was sent and the admin will message them once approved (usually within a day). Until then, don't quote reseller prices. You can still help with retail orders." };
     }
 
     case "handoff_to_human": {
@@ -651,7 +749,8 @@ app.get("/admin/api/conversations", requireAdmin, async (req, res) => {
   const entries = Array.from(chatLog.entries()).reverse().slice(0, 20);
   const list = await Promise.all(entries.map(async ([psid, msgs]) => {
     const last = msgs[msgs.length - 1] || {};
-    return { id: psid, psid, customerName: await getCustomerName(psid), snippet: last.text || "", updated: last.time, botPaused: isPaused(psid) };
+    const member = await getResellerSafe(psid);
+    return { id: psid, psid, customerName: await getCustomerName(psid), snippet: last.text || "", updated: last.time, botPaused: isPaused(psid), reseller: member ? member.tier : null };
   }));
   res.json(list);
 });
@@ -686,6 +785,45 @@ app.post("/admin/api/send", requireAdmin, async (req, res) => {
     recordChat(psid, true, text, "admin");
     res.json({ ok: true, messageId: data.message_id });
   } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+// --- Reseller program (approve resellers, upload private costs) ---
+app.get("/admin/api/reseller", requireAdmin, async (req, res) => {
+  const psid = String(req.query.psid || "");
+  if (!/^\d+$/.test(psid)) return res.status(400).json({ error: "Bad id." });
+  try { res.json({ member: await reseller.getMember(psid) }); } catch (e) { res.status(502).json({ error: e.message }); }
+});
+app.post("/admin/api/reseller", requireAdmin, async (req, res) => {
+  const psid = String((req.body && req.body.psid) || "");
+  const tier = String((req.body && req.body.tier) || "").toLowerCase();
+  if (!/^\d+$/.test(psid)) return res.status(400).json({ error: "Pick a conversation first." });
+  if (!["starter", "gold", "none"].includes(tier)) return res.status(400).json({ error: "Tier must be starter, gold or none." });
+  try {
+    const before = await reseller.getMember(psid);
+    const member = tier === "none" ? await reseller.setMember(psid, null)
+      : await reseller.setMember(psid, { tier, name: (before && before.name) || await getCustomerName(psid), since: before && before.since });
+    if (member && (!before || before.tier !== member.tier) && req.body.notify !== false) {
+      const label = member.tier === "gold" ? "Gold" : "Starter";
+      await sendText(psid, `Welcome to the 3UK Philippines reseller program! 🎉 You're now a ${label} reseller. Ask me for any destination and I'll show your reseller price, the retail price, and your profit.`);
+    }
+    res.json({ ok: true, member });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+app.get("/admin/api/resellers", requireAdmin, async (req, res) => {
+  try { res.json({ members: await reseller.listMembers(), costs: reseller.getCostsInfo() }); } catch (e) { res.status(502).json({ error: e.message }); }
+});
+// Upload the eSIMCard "reseller_pricing" export (.xlsx) -- needs the Price (cost) and Retail Price columns.
+app.post("/admin/api/reseller-costs", requireAdmin, express.raw({ type: "*/*", limit: "20mb" }), async (req, res) => {
+  try {
+    const buf = req.body;
+    if (!Buffer.isBuffer(buf) || buf.slice(0, 2).toString() !== "PK") return res.status(400).json({ error: "That's not an Excel (.xlsx) file." });
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf);
+    const map = reseller.costsFromWorkbook(wb);
+    if (map.size < 500) return res.status(400).json({ error: `Only ${map.size} plans with a cost found. Upload the eSIMCard reseller_pricing export (it needs "Price" and "Retail Price" columns).` });
+    const r = await reseller.saveCosts(map, "Admin Console upload");
+    res.json({ ok: true, plans: map.size, savedToDatabase: r.saved });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post("/admin/api/resume-bot", requireAdmin, (req, res) => {
@@ -804,11 +942,19 @@ function appendNote(senderId, note) {
 // Ask Claude for a reply, with a short tool-use loop.
 // ---------------------------------------------------------------------
 async function getClaudeReply(senderId, userText) {
+  const member = await getResellerSafe(senderId);
+  const resellerContext = member
+    ? `\n\n--- THIS CHAT ---\nThis person is an APPROVED ${member.tier === "gold" ? "GOLD" : "STARTER"} RESELLER` +
+      `${member.name ? ` (${member.name})` : ""}. Search and get_plan results include "resellerPrice" (what THEY pay us), ` +
+      `"retailPrice" (our public price) and "resellerProfitIfSoldAtRetail". Quote the resellerPrice as their price, and you may ` +
+      `mention the retail price and their profit. Use the resellerPrice as confirmedPrice in create_order. Discount codes don't ` +
+      `apply to reseller prices.` + (member.tier === "gold" ? ` As a Gold reseller they can pay with paymentMethod "Wallet" (deducted from their prepaid wallet).` : "")
+    : "\n\n--- THIS CHAT ---\nThis person is NOT an approved reseller. Never quote reseller prices or reseller discounts to them.";
   const systemPrompt =
     "You are the AI assistant for 3UK Philippines, an eSIM business, replying to customers on Facebook " +
     "Messenger. Follow the business information below exactly. For ANY plan or price question, use the " +
     "search_esim_plans / get_plan tools -- never guess or remember a price. If a destination isn't found, " +
-    "say so plainly. Write plain text only (no asterisks or markdown).\n\n" + BUSINESS_INFO;
+    "say so plainly. Write plain text only (no asterisks or markdown).\n\n" + BUSINESS_INFO + resellerContext;
 
   const messages = getHistory(senderId).slice();
   messages.push({ role: "user", content: userText });
