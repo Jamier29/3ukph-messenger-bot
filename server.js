@@ -62,6 +62,8 @@ app.use("/qr", express.static(path.join(__dirname, "public", "qr")));
 
 // Privacy policy page (required by Meta for app review): <PUBLIC_URL>/privacy
 app.get("/privacy", (req, res) => res.sendFile(path.join(__dirname, "public", "privacy.html")));
+// One link for bios (TikTok, Instagram): choose WhatsApp or Messenger.
+app.get("/chat", (req, res) => res.sendFile(path.join(__dirname, "public", "chat.html")));
 
 const PAYMENT_METHODS = {
   gcash: "GCash",
@@ -757,6 +759,7 @@ app.get("/robots.txt", (req, res) => res.type("text/plain").send("User-agent: *\
 app.get("/sitemap.xml", (req, res) => res.type("application/xml").send(
   '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' +
   '  <url><loc>https://3ukph.com/</loc><changefreq>weekly</changefreq><priority>1.0</priority></url>\n' +
+  '  <url><loc>https://3ukph.com/chat</loc><changefreq>monthly</changefreq><priority>0.6</priority></url>\n' +
   '  <url><loc>https://3ukph.com/privacy</loc><changefreq>yearly</changefreq><priority>0.3</priority></url>\n' +
   '</urlset>\n'));
 app.get("/logo.png", (req, res) => res.sendFile(path.join(__dirname, "public", "logo.png")));
