@@ -1006,6 +1006,8 @@ async function loadChatLogs() {
   } catch (err) { console.error("[chatlog] load failed:", err.message); }
 }
 setTimeout(loadChatLogs, 500);
+setTimeout(() => { if (esims.configured()) esims.packageList().catch(() => {}); }, 15000); // download eSIMCard package list in the background
+setInterval(() => { if (esims.configured()) esims.packageList().catch(() => {}); }, 3600000);
 
 // Image in a chat (payment screenshot, QR code) for the Admin Console: /admin/api/media?psid=...&id=...
 app.get("/admin/api/media", requireAdmin, async (req, res) => {
@@ -1223,12 +1225,11 @@ app.get("/admin/api/delivery", requireAdmin, async (req, res) => {
   const plan = planId ? getPlan(planId) : null;
   const out = { order, plan: plan ? { planId: plan.planId, name: plan.name, destination: plan.destination, price: plan.price } : null, apiConnected: esims.configured() };
   if (plan && esims.configured()) {
-    const ready = await Promise.race([esims.packageList().then(() => true), new Promise((r) => setTimeout(() => r(false), 20000))]);
-    if (!ready) { out.packageError = "Loading the eSIMCard price list (first time takes up to a minute). Pick the plan again in a minute."; return res.json(out); }
     try {
       const raw = getRawPlan(plan.planId);
       const pk = await esims.findPackage(plan.name, { retailUSD: raw && raw.retailPrice, costUSD: reseller.costOf(raw) });
-      if (pk && pk.ambiguous) out.packageError = `eSIMCard has ${pk.matches} packages named "${pk.name}" and the price didn't single one out. Deliver this one manually.`;
+      if (pk && pk.loading) out.packageError = `Downloading the eSIMCard package list (${pk.status.building || "starting"}). This takes about 5 minutes the first time; pick the plan again shortly.`;
+      else if (pk && pk.ambiguous) out.packageError = `eSIMCard has ${pk.matches} packages named "${pk.name}" and the price didn't single one out. Deliver this one manually.`;
       else out.package = pk;
     } catch (e) { out.packageError = e.message; }
     try { out.balanceUSD = await esims.accountBalance(); } catch (e) { /* optional */ }
@@ -1247,6 +1248,7 @@ app.post("/admin/api/deliver", requireAdmin, async (req, res) => {
   try {
     const rawPlan = getRawPlan(plan.planId);
     const pkg = await esims.findPackage(plan.name, { retailUSD: rawPlan && rawPlan.retailPrice, costUSD: reseller.costOf(rawPlan) });
+    if (pkg && pkg.loading) return res.status(503).json({ error: "The eSIMCard package list is still downloading. Try again in a few minutes." });
     if (pkg && pkg.ambiguous) return res.status(400).json({ error: `eSIMCard has ${pkg.matches} packages with this name. Deliver this one manually.` });
     if (!pkg) return res.status(400).json({ error: `eSIMCard has no package named "${plan.name}". Deliver this one manually.` });
     if (String(b.packageId || "") !== pkg.id) return res.status(409).json({ error: "The package changed since you checked. Tap Check again." });
@@ -1480,17 +1482,15 @@ app.get("/admin/esimcard-test", async (req, res) => {
       return res.type("application/json").send(`// ${Date.now() - t0} ms\n` + JSON.stringify(d, null, 2).slice(0, 6000));
     }
     if (req.query.find || req.query.pricing) {
-      // Load the eSIMCard price list in the background; this page never waits more than 20 s.
-      const ready = await Promise.race([esims.packageList().then(() => true), new Promise((r) => setTimeout(() => r(false), 20000))]);
+      await esims.packageList();
       const st = esims.pricingStatus();
-      if (!ready) return res.type("text/plain").send("Still downloading the eSIMCard price list (it's big). Wait 1 minute and refresh this page.");
-      if (req.query.pricing || !st.packages) return res.type("application/json").send(JSON.stringify(st, null, 2).slice(0, 5000));
+      if (req.query.pricing || !st.packages) return res.type("application/json").send(JSON.stringify(st, null, 2).slice(0, 5000) + (st.packages ? "" : "\n\nThe package list is downloading in the background (about 5 minutes). Refresh this page to see progress."));
       const rows = [];
       for (const pl of findPlansByText(req.query.find, 4)) {
         const raw = getRawPlan(pl.planId);
-        rows.push({ planId: pl.planId, name: pl.name, ourPrice: pl.price, retailUSD: raw && raw.retailPrice, package: await esims.findPackage(pl.name, { retailUSD: raw && raw.retailPrice, costUSD: reseller.costOf(raw) }) });
+        rows.push({ planId: pl.planId, name: pl.name, ourPrice: pl.price, costUSD: reseller.costOf(raw), package: await esims.findPackage(pl.name, { retailUSD: raw && raw.retailPrice, costUSD: reseller.costOf(raw) }) });
       }
-      return res.type("application/json").send(JSON.stringify({ priceList: { packages: st.packages, loadedIn: st.ms + " ms" }, rows }, null, 2));
+      return res.type("application/json").send(JSON.stringify({ packageList: { packages: st.packages, loadedAt: st.loadedAt }, rows }, null, 2));
     }
     const out = ic ? await esims.usage(ic) : await esims.call("my-esims?page=1");
     res.type("application/json").send(JSON.stringify(out, null, 2).slice(0, 6000));

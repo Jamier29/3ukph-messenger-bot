@@ -267,26 +267,72 @@ function collectPackages(d) {
   })(d, 0);
   return out;
 }
-let pricingInflight = null;
-async function packageList(force) {
-  const age = Date.now() - pricingCache.at;
-  if (pricingCache.at && age < (pricingCache.list.length ? 6 * 3600000 : 5 * 60000) && !(force && age > 10 * 60000)) return pricingCache.list;
-  if (pricingInflight) return pricingInflight;
-  pricingInflight = (async () => {
-    const t0 = Date.now();
-    let list = [];
-    try {
-      const d = await api(`${await extension()}/pricing`, undefined, 90000);
-      list = collectPackages(d);
-      pricingCache.shape = Array.isArray(d) ? "array" : Object.keys(d || {}).join(",");
-    } catch (e) { pricingCache.error = e.message; console.error("[esimcard] pricing failed:", e.message); }
-    pricingCache = { ...pricingCache, at: Date.now(), list, ms: Date.now() - t0 };
-    console.log(`[esimcard] pricing: ${list.length} packages in ${pricingCache.ms} ms`);
-    return list;
-  })().finally(() => { pricingInflight = null; });
-  return pricingInflight;
+// eSIMCard's full /pricing list times out, so we page through /packages (20 per page,
+// ~320 pages) in the background, keep a slim copy in Upstash for 24 h, and match from it.
+const zlib = require("zlib");
+let pkgBuild = null; // { startedAt, done, total, errors }
+async function fetchAllPackages() {
+  const out = [];
+  for (const type of ["DATA-ONLY", "DATA-VOICE-SMS"]) {
+    const first = await call(`packages?package_type=${type}&page=1`);
+    const last = Number((first.meta && (first.meta.lastPage || first.meta.last_page)) || 1);
+    pkgBuild.total += last;
+    const take = (d) => (Array.isArray(d && d.data) ? d.data : []).forEach((x) => {
+      if (x && x.id && x.name) out.push({ id: String(x.id), name: String(x.name).trim(), price: num(x.price), days: num(x.package_validity), type });
+    });
+    take(first); pkgBuild.done++;
+    let next = 2;
+    const worker = async () => {
+      while (next <= last) {
+        const page = next++;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try { take(await call(`packages?package_type=${type}&page=${page}`)); break; }
+          catch (e) { if (attempt === 2) { pkgBuild.errors++; console.error(`[esimcard] packages page ${page} failed:`, e.message); } else await new Promise((r) => setTimeout(r, 1500)); }
+        }
+        pkgBuild.done++;
+      }
+    };
+    await Promise.all([worker(), worker(), worker(), worker()]);
+  }
+  return out;
 }
-function pricingStatus() { return { packages: pricingCache.list.length, loadedAt: pricingCache.at ? new Date(pricingCache.at).toISOString() : null, ms: pricingCache.ms, shape: pricingCache.shape, error: pricingCache.error, sample: pricingCache.list.slice(0, 2).map((p) => p.raw) }; }
+async function buildPackageIndex() {
+  if (pkgBuild && !pkgBuild.finishedAt) return;
+  pkgBuild = { startedAt: Date.now(), done: 0, total: 0, errors: 0 };
+  try {
+    const list = await fetchAllPackages();
+    if (pkgBuild.errors > 10 || list.length < 100) throw new Error(`incomplete list (${list.length} packages, ${pkgBuild.errors} failed pages)`);
+    pricingCache = { at: Date.now(), list: list.map((p) => ({ ...p, raw: { price: p.price } })), ms: Date.now() - pkgBuild.startedAt };
+    if (redis) {
+      const packed = zlib.gzipSync(JSON.stringify({ at: pricingCache.at, list })).toString("base64");
+      await redis(["SET", "esimcard:packages", packed, "EX", 3 * 24 * 3600]).catch((e) => console.error("[esimcard] save list:", e.message));
+    }
+    console.log(`[esimcard] package list ready: ${list.length} packages in ${Math.round(pricingCache.ms / 1000)} s`);
+  } catch (e) { pricingCache.error = e.message; console.error("[esimcard] package list failed:", e.message); }
+  finally { pkgBuild.finishedAt = Date.now(); }
+}
+let loadedSaved = false;
+async function loadSavedPackages() {
+  if (loadedSaved || !redis) return; loadedSaved = true;
+  try {
+    const v = await redis(["GET", "esimcard:packages"]);
+    if (!v) return;
+    const d = JSON.parse(zlib.gunzipSync(Buffer.from(v, "base64")).toString("utf8"));
+    if (!pricingCache.list.length) pricingCache = { at: d.at, list: d.list.map((p) => ({ ...p, raw: { price: p.price } })) };
+  } catch (e) { console.error("[esimcard] load saved list:", e.message); }
+}
+// Returns the package list now (possibly empty while the first download runs).
+async function packageList() {
+  await loadSavedPackages();
+  const stale = !pricingCache.at || Date.now() - pricingCache.at > 24 * 3600000;
+  if (stale && TOKEN && !(pkgBuild && !pkgBuild.finishedAt)) buildPackageIndex();
+  return pricingCache.list;
+}
+function pricingStatus() {
+  return { packages: pricingCache.list.length, loadedAt: pricingCache.at ? new Date(pricingCache.at).toISOString() : null,
+    building: pkgBuild && !pkgBuild.finishedAt ? `${pkgBuild.done}/${pkgBuild.total || "?"} pages` : null,
+    error: pricingCache.error || null, sample: pricingCache.list.slice(0, 2).map(({ raw, ...p }) => p) };
+}
 const normName = (n) => String(n || "").toLowerCase().replace(/\s+/g, " ").trim();
 // Several packages can share one name (different networks/prices), so the price must match too.
 function priceValues(raw) {
@@ -295,9 +341,9 @@ function priceValues(raw) {
   return vals;
 }
 async function findPackage(name, hint = {}) {
-  let list = await packageList();
+  const list = await packageList();
+  if (!list.length) return { loading: true, status: pricingStatus() };
   let hits = list.filter((p) => normName(p.name) === normName(name));
-  if (!hits.length) { list = await packageList(true); hits = list.filter((p) => normName(p.name) === normName(name)); }
   if (!hits.length) return null;
   if (hits.length > 1) {
     const targets = [hint.retailUSD, hint.costUSD].filter((x) => x > 0);
