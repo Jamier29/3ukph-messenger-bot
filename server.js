@@ -17,6 +17,7 @@ const { startPriceSync, syncPrices, getSyncStatus } = require("./priceSync");
 const crypto = require("crypto");
 const ExcelJS = require("exceljs");
 const reseller = require("./reseller");
+const esims = require("./esimcard");
 
 const app = express();
 app.use(express.json());
@@ -232,6 +233,7 @@ async function checkDiscountDb() {
 }
 // Reseller program data (private costs + approved resellers) also lives in Upstash.
 reseller.init(UPSTASH_URL && UPSTASH_TOKEN ? redis : null);
+esims.init(UPSTASH_URL && UPSTASH_TOKEN ? redis : null);
 
 if (UPSTASH_URL && UPSTASH_TOKEN) {
   checkDiscountDb().then((r) => console.log(`[discount] Discount database: ${r.ok ? "✅" : "❌"} ${r.message}`));
@@ -335,6 +337,14 @@ const TOOLS = [
       },
       required: ["planId", "confirmedPrice", "paymentMethod", "email"]
     }
+  },
+  {
+    name: "check_data_usage",
+    description:
+      "Check how much data a customer has used / has left on their 3UK eSIM (live from our system). Use when they ask about " +
+      "data usage, remaining data, balance of their eSIM, or validity. Without an iccid it checks the eSIMs saved for this " +
+      "customer. If they give their ICCID (starts with 89, 18-22 digits), pass it.",
+    input_schema: { type: "object", properties: { iccid: { type: "string", description: "Optional ICCID the customer provided." } } }
   },
   {
     name: "check_wallet",
@@ -597,6 +607,40 @@ async function runTool(name, input, senderId) {
               : `The ${methodName} payment QR image was just sent to the customer. Tell them to pay exactly ${plan.price} using it and send a screenshot of the payment here. Their eSIM QR code arrives within 5 minutes after the payment is confirmed.`)
           : `The payment QR could not be sent automatically. Tell the customer the order is noted and an admin will send the ${methodName} payment QR here shortly. Amount to pay: ${plan.price}.`
       };
+    }
+
+    case "check_data_usage": {
+      let list = [];
+      try { list = await esims.listEsims(senderId); } catch (e) { console.error("[esims] list failed:", e.message); }
+      let targets = list.map((e) => e.iccid);
+      if (input.iccid) {
+        const ic = esims.cleanIccid(input.iccid);
+        if (!esims.isIccid(ic)) return { error: "That doesn't look like a valid ICCID. It starts with 89 and has about 19-20 digits. Ask them to check it." };
+        targets = [ic];
+      }
+      if (!targets.length) {
+        return { noEsimsOnFile: true, instructionsForYou: "We don't have an eSIM saved for this chat yet. Ask for the ICCID (reference number starting with 89 that we sent with their eSIM). If they don't have it, hand off to the admin." };
+      }
+      if (!esims.configured()) {
+        await notifyAdmin({ title: "Data usage request", message: `Customer: ${await getCustomerName(senderId)}\nICCID: ${targets.join(", ")}\nPlease check usage in eSIMCard and reply.`, tags: "bar_chart" });
+        return { instructionsForYou: "Tell them an admin will check their data usage and reply here shortly." };
+      }
+      const results = [];
+      for (const ic of targets.slice(0, 3)) {
+        try {
+          const u = await esims.usage(ic);
+          const rec = list.find((e) => e.iccid === ic);
+          results.push({ iccidEnding: ic.slice(-4), plan: (rec && rec.plan) || u.bundle || undefined, total: u.total, used: u.used, remaining: u.remaining, percentUsed: u.percentUsed, unlimited: u.unlimited, status: u.status, expires: u.expires });
+        } catch (e) {
+          console.error("[esims] usage failed:", e.message);
+          results.push({ iccidEnding: ic.slice(-4), error: "Couldn't read usage right now." });
+        }
+      }
+      if (results.every((r) => r.error)) {
+        await notifyAdmin({ title: "Data usage check failed", message: `Customer: ${await getCustomerName(senderId)}\nICCID: ${targets.join(", ")}\nThe automatic check failed; please check in eSIMCard and reply.`, tags: "warning" });
+        return { instructionsForYou: "Tell them you couldn't load the usage right now and an admin will check and reply here shortly." };
+      }
+      return { results, instructionsForYou: "Tell them the usage clearly (used / total / remaining, and expiry if known). Refer to each eSIM by the last 4 digits of its ICCID. If data is low, offer a top-up or a new plan." };
     }
 
     case "check_wallet": {
@@ -1131,6 +1175,46 @@ app.post("/admin/api/reseller-costs", requireAdmin, express.raw({ type: "*/*", l
     const r = await reseller.saveCosts(map, "Admin Console upload");
     res.json({ ok: true, plans: map.size, savedToDatabase: r.saved });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// --- eSIM records per customer (permanent) + live usage ---
+app.get("/admin/api/esims", requireAdmin, async (req, res) => {
+  const psid = String(req.query.psid || "");
+  if (!/^(wa)?\d+$/.test(psid)) return res.status(400).json({ error: "Bad id." });
+  try { res.json({ esims: await esims.listEsims(psid), apiConnected: esims.configured() }); } catch (e) { res.status(502).json({ error: e.message }); }
+});
+app.post("/admin/api/esims", requireAdmin, async (req, res) => {
+  const b = req.body || {};
+  const psid = String(b.psid || "");
+  if (!/^(wa)?\d+$/.test(psid)) return res.status(400).json({ error: "Pick a conversation first." });
+  try {
+    if (b.remove) return res.json({ ok: true, esims: await esims.removeEsim(psid, b.remove) });
+    const entry = await esims.addEsim(psid, b);
+    appendNote(psid, `[ADMIN UPDATE: eSIM delivered and saved for this customer: ${entry.plan || "eSIM"} (ICCID ending ${entry.iccid.slice(-4)}). Use check_data_usage when they ask about their data.]`);
+    res.json({ ok: true, entry, esims: await esims.listEsims(psid) });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.get("/admin/api/esim-usage", requireAdmin, async (req, res) => {
+  const ic = esims.cleanIccid(req.query.iccid);
+  if (!esims.isIccid(ic)) return res.status(400).json({ error: "Enter a valid ICCID." });
+  try { const u = await esims.usage(ic); delete u.raw; res.json(u); } catch (e) { res.status(502).json({ error: e.message }); }
+});
+app.get("/admin/api/esim-find", requireAdmin, async (req, res) => {
+  const ic = esims.cleanIccid(req.query.iccid);
+  try {
+    const psid = await esims.findCustomerByIccid(ic);
+    res.json(psid ? { psid, customerName: await getCustomerName(psid), channel: isWa(psid) ? "WhatsApp" : "Messenger" } : { psid: null });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+// Raw eSIMCard API check (for setup): /admin/esimcard-test?key=ADMIN_KEY&iccid=89...
+app.get("/admin/esimcard-test", async (req, res) => {
+  if (!adminKeyOk(req.query.key)) return res.status(403).send("Wrong or missing key.");
+  if (!esims.configured()) return res.type("text/plain").send("ESIMCARD_TOKEN is not set in Render yet.");
+  try {
+    const ic = esims.cleanIccid(req.query.iccid);
+    const out = ic ? await esims.usage(ic) : await esims.call("my-esims?page=1");
+    res.type("application/json").send(JSON.stringify(out, null, 2).slice(0, 6000));
+  } catch (e) { res.status(502).type("text/plain").send(e.message + (e.data ? "\n" + JSON.stringify(e.data).slice(0, 1500) : "")); }
 });
 
 app.post("/admin/api/resume-bot", requireAdmin, (req, res) => {

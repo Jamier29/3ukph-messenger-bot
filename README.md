@@ -1,5 +1,13 @@
 # 3UKPH Messenger Bot — Setup Guide
 
+## Update (Oct 2026): eSIM records + live data usage
+
+- Admin Console → open a chat → **This customer's eSIMs**: save each delivered eSIM (ICCID, plan, email). Saved permanently.
+- **Check usage** in the console, or **Check an ICCID** (also shows which customer owns it).
+- The bot answers "how much data do I have left?" by itself (tool `check_data_usage`).
+- Needs `ESIMCARD_TOKEN` in Render = the API key from the eSIMCard partner dashboard. Test it:
+  `https://3ukph.com/admin/esimcard-test?key=ADMIN_KEY&iccid=89...`
+
 ## Update (Oct 2026): reseller program
 
 - Approved resellers automatically see and pay their **reseller price** in Messenger:

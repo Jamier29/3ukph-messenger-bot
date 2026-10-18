@@ -135,8 +135,28 @@
           <button class="ghost" id="tierBtn" title="Save reseller status for this customer">Save</button>
         </div>
         <div class="status" id="tierStatus"></div>
+        <div class="hidden" id="esimBox" style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
+          <b>📶 This customer's eSIMs</b> <span class="help" id="esimApi"></span>
+          <div id="esimList" class="help" style="margin:8px 0">Loading…</div>
+          <div class="row" style="gap:6px">
+            <input type="text" id="esimIccid" placeholder="ICCID (89…)" inputmode="numeric" style="max-width:220px">
+            <input type="text" id="esimPlan" placeholder="Plan, e.g. Europe 20GB 30 days" style="max-width:240px">
+            <input type="text" id="esimEmail" placeholder="Email (optional)" style="max-width:200px">
+            <button class="ghost" id="esimAddBtn" title="Save this eSIM under the customer">Save eSIM</button>
+          </div>
+          <div class="status" id="esimStatus"></div>
+        </div>
       </section>
     </div>
+
+    <!-- ICCID lookup -->
+    <section class="card">
+      <span class="step">eSIM lookup</span>
+      <h2>Check an ICCID</h2>
+      <p class="help">Paste an ICCID to see its live data usage and which customer it belongs to.</p>
+      <div class="row"><input type="text" id="lookIccid" placeholder="ICCID (89…)" inputmode="numeric" style="max-width:280px"><button class="ghost" id="lookBtn">Check</button></div>
+      <div class="status" id="lookStatus"></div>
+    </section>
 
     <!-- Reseller program -->
     <section class="card">
@@ -248,6 +268,7 @@
     $("sendBtn").textContent = "Send to " + (c.channel || "Messenger"); $("trRow").classList.add("hidden");
     $("resellerRow").classList.remove("hidden"); $("tierStatus").textContent = "";
     $("tierSelect").value = c.reseller || "none";
+    $("esimBox").classList.remove("hidden"); $("esimStatus").textContent = ""; loadEsims();
     Array.prototype.forEach.call(document.querySelectorAll(".conv"), function (x) { x.classList.remove("active"); });
     loadMessages();
     clearInterval(pollTimer); pollTimer = setInterval(loadMessages, 4000);
@@ -291,6 +312,62 @@
     });
     Array.prototype.forEach.call(document.querySelectorAll("#thread a.media-doc"), function (a) {
       a.onclick = function (e) { e.preventDefault(); var id = a.getAttribute("data-id"); (mediaCache[id] ? Promise.resolve(mediaCache[id]) : fetchMedia(id)).then(function (u) { window.open(u, "_blank"); }).catch(function () { alert("Document not available."); }); };
+    });
+  }
+
+  function usageText(u) {
+    if (!u) return "";
+    var parts = [];
+    if (u.used || u.total) parts.push("Used " + (u.used || "?") + " of " + (u.total || (u.unlimited ? "Unlimited" : "?")) + (u.percentUsed != null ? " (" + u.percentUsed + "%)" : ""));
+    if (u.remaining) parts.push(u.remaining + " left");
+    if (u.expires) parts.push("expires " + u.expires);
+    if (u.status) parts.push(String(u.status));
+    return parts.join(" · ") || "No usage data returned.";
+  }
+  function loadEsims() {
+    if (!current) return;
+    api("/admin/api/esims?psid=" + encodeURIComponent(current.psid)).then(function (d) {
+      $("esimApi").textContent = d.apiConnected ? "· live usage on" : "· live usage off (add ESIMCARD_TOKEN in Render)";
+      var l = d.esims || [];
+      $("esimList").innerHTML = l.length ? l.map(function (e) {
+        return '<div style="padding:6px 0;border-bottom:1px solid var(--line)"><b>' + esc(e.iccid) + '</b> <span>' + esc(e.plan || "") + '</span><br><span>' +
+          esc(fmt(e.addedAt)) + (e.email ? " · " + esc(e.email) : "") + '</span> ' +
+          '<a href="#" data-u="' + esc(e.iccid) + '">Check usage</a> · <a href="#" data-c="' + esc(e.iccid) + '">Copy</a> · <a href="#" data-r="' + esc(e.iccid) + '">Remove</a>' +
+          '<div class="help" id="u' + esc(e.iccid) + '"></div></div>';
+      }).join("") : "No eSIM saved yet. After delivering, paste the ICCID below and click Save.";
+      Array.prototype.forEach.call($("esimList").querySelectorAll("a"), function (a) {
+        a.onclick = function (ev) {
+          ev.preventDefault();
+          var ic = a.getAttribute("data-u") || a.getAttribute("data-c") || a.getAttribute("data-r");
+          if (a.hasAttribute("data-c")) { try { navigator.clipboard.writeText(ic); a.textContent = "Copied ✓"; } catch (e) {} return; }
+          if (a.hasAttribute("data-r")) {
+            if (!confirm("Remove eSIM " + ic + " from this customer?")) return;
+            api("/admin/api/esims", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ psid: current.psid, remove: ic }) }).then(loadEsims);
+            return;
+          }
+          var box = document.getElementById("u" + ic); box.textContent = "Checking…";
+          api("/admin/api/esim-usage?iccid=" + encodeURIComponent(ic)).then(function (u) { box.textContent = usageText(u); }).catch(function (e) { box.textContent = e.message; });
+        };
+      });
+    }).catch(function (e) { $("esimList").textContent = e.message; });
+  }
+  function addEsim() {
+    if (!current) return;
+    $("esimStatus").className = "status"; $("esimStatus").textContent = "Saving…";
+    api("/admin/api/esims", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ psid: current.psid, iccid: $("esimIccid").value, plan: $("esimPlan").value, email: $("esimEmail").value }) })
+      .then(function () { $("esimStatus").className = "status ok"; $("esimStatus").textContent = "✓ eSIM saved. The bot can now check this customer's data usage."; $("esimIccid").value = ""; $("esimPlan").value = ""; $("esimEmail").value = ""; loadEsims(); })
+      .catch(function (e) { $("esimStatus").className = "status err"; $("esimStatus").textContent = e.message; });
+  }
+  function lookIccid() {
+    var ic = $("lookIccid").value.replace(/\D/g, "");
+    $("lookStatus").className = "status"; $("lookStatus").textContent = "Checking…";
+    Promise.all([
+      api("/admin/api/esim-find?iccid=" + ic).catch(function () { return {}; }),
+      api("/admin/api/esim-usage?iccid=" + ic).catch(function (e) { return { error: e.message }; })
+    ]).then(function (r) {
+      var who = r[0] && r[0].psid ? "Customer: " + r[0].customerName + " (" + r[0].channel + ")" : "Not saved under any customer yet.";
+      $("lookStatus").className = "status ok";
+      $("lookStatus").textContent = who + " — " + (r[1].error ? "Usage: " + r[1].error : usageText(r[1]));
     });
   }
 
@@ -429,6 +506,8 @@
   }
 
   $("tierBtn").onclick = saveTier;
+  $("esimAddBtn").onclick = addEsim;
+  $("lookBtn").onclick = lookIccid;
   $("txBtn").onclick = saveTx;
   $("csvBtn").onclick = walletCsv;
   $("allCsvBtn").onclick = allCsv;

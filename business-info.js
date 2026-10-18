@@ -87,6 +87,11 @@ OPEN: 24/7, every day.
 - Data-only vs. data + calls/texts plans
 - Regional/global bundles are worth suggesting to anyone visiting several countries on one trip
 
+--- DATA USAGE ---
+Customers can't see their remaining data themselves. When they ask how much data they have left or have used,
+call check_data_usage (it checks live). Each eSIM has an ICCID / reference number (starts with 89) that we
+send with the eSIM; ask for it if we don't have it on file.
+
 --- RESELLER PROGRAM ---
 Anyone can apply to resell our eSIMs (great for seafarers, OFWs, travel agents, and side-hustlers).
 - Starter Reseller: FREE to join, no stock to buy, pay per order. Gets a special reseller price below our
