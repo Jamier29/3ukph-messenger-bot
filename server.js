@@ -1269,7 +1269,7 @@ app.post("/admin/api/deliver", requireAdmin, async (req, res) => {
     const steps = [];
     if (sim.lpa) {
       let png;
-      try { png = brandedQr(sim.lpa); } // 3UK-branded card; falls back to a plain QR
+      try { png = brandedQr(sim.lpa, sim.iccid); } // 3UK-branded card; falls back to a plain QR
       catch (e) { console.error("[deliver] branded QR failed:", e.message); png = await QRCode.toBuffer(sim.lpa, { width: 720, margin: 3, errorCorrectionLevel: "M" }); }
       await adminSendImage(psid, png, "image/png", `Your eSIM QR code: ${plan.name}`);
       steps.push("qr");
