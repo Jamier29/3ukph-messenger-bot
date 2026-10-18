@@ -250,4 +250,16 @@ function regionSummaries() {
   return out;
 }
 
-module.exports = { getRawPlan, regionSummaries, searchPlans, getPlan, listAllDestinations, getRate, getCatalogInfo, headlinePrices, setCatalog, formatPHP, toPHP };
+// Admin console: find plans by words in the name/destination (e.g. "europe 20gb 30").
+function findPlansByText(q, limit = 15) {
+  const words = String(q || "").toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return [];
+  const out = [];
+  for (const p of PLANS) {
+    const hay = (p.name + " " + p.destination).toLowerCase();
+    if (words.every((w) => hay.includes(w))) { out.push(describePlan(p)); if (out.length >= limit) break; }
+  }
+  return out;
+}
+
+module.exports = { findPlansByText, getRawPlan, regionSummaries, searchPlans, getPlan, listAllDestinations, getRate, getCatalogInfo, headlinePrices, setCatalog, formatPHP, toPHP };

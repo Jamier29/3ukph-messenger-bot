@@ -12,7 +12,8 @@ const fs = require("fs");
 const path = require("path");
 const express = require("express");
 const { BUSINESS_INFO } = require("./business-info");
-const { getRawPlan, searchPlans, getPlan, listAllDestinations, getRate, headlinePrices, regionSummaries, formatPHP } = require("./planSearch");
+const { findPlansByText, getRawPlan, searchPlans, getPlan, listAllDestinations, getRate, headlinePrices, regionSummaries, formatPHP } = require("./planSearch");
+const QRCode = require("qrcode");
 const { startPriceSync, syncPrices, getSyncStatus } = require("./priceSync");
 const crypto = require("crypto");
 const ExcelJS = require("exceljs");
@@ -1121,13 +1122,67 @@ async function loadSentImage(key) {
   if (!v) return null;
   const d = JSON.parse(v); return { mime: d.mime, buf: Buffer.from(d.b64, "base64") };
 }
+// Sends an image as the admin (WhatsApp or Messenger) and records it for the console.
+async function adminSendImage(psid, buf, mime, caption, capExtra) {
+  const ext = mime === "image/png" ? "png" : mime === "image/webp" ? "webp" : mime === "image/gif" ? "gif" : "jpg";
+  let media, messageId;
+  if (isWa(psid)) {
+    const fd = new FormData();
+    fd.append("messaging_product", "whatsapp");
+    fd.append("type", mime);
+    fd.append("file", new Blob([buf], { type: mime }), `image.${ext}`);
+    const up = await fetch(`https://graph.facebook.com/v21.0/${WA_PHONE_NUMBER_ID}/media`, { method: "POST", headers: { Authorization: `Bearer ${WA_TOKEN}` }, body: fd });
+    const ud = await up.json().catch(() => ({}));
+    if (!up.ok || !ud.id) throw new Error("WhatsApp didn't accept the image: " + ((ud.error && ud.error.message) || up.status));
+    const data = await waSend(psid, { type: "image", image: caption ? { id: ud.id, caption } : { id: ud.id } });
+    if (!data) throw new Error("WhatsApp didn't deliver the image. If the customer's last message was more than 24 hours ago, WhatsApp only allows template messages.");
+    messageId = data.messages && data.messages[0] && data.messages[0].id;
+    media = { src: "wa", id: ud.id, mime };
+  } else {
+    const fd = new FormData();
+    fd.append("recipient", JSON.stringify({ id: psid }));
+    fd.append("messaging_type", "RESPONSE");
+    fd.append("message", JSON.stringify({ attachment: { type: "image", payload: { is_reusable: false } } }));
+    fd.append("filedata", new Blob([buf], { type: mime }), `image.${ext}`);
+    const r = await fetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${encodeURIComponent(PAGE_ACCESS_TOKEN)}`, { method: "POST", body: fd });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error((data.error && data.error.message) || `Facebook error ${r.status}`);
+    messageId = data.message_id; rememberAdminSent(messageId);
+    if (caption) await adminSendText(psid, caption, true);
+    media = { src: "store", mime };
+  }
+  pauseBot(psid);
+  const key = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  await storeSentImage(key, mime, buf);
+  media.key = key;
+  recordChat(psid, true, caption ? "(image) " + caption : "(image)", "admin", { media, ...(capExtra || {}) });
+  return messageId;
+}
+// Sends a text as the admin (no console record when quiet=true; caller records it).
+async function adminSendText(psid, text, quiet) {
+  if (isWa(psid)) {
+    const data = await waSend(psid, { type: "text", text: { body: text.slice(0, 4000), preview_url: false } });
+    if (!data) throw new Error("WhatsApp didn't accept the message (24-hour window may have closed).");
+  } else {
+    const r = await fetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${encodeURIComponent(PAGE_ACCESS_TOKEN)}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ recipient: { id: psid }, messaging_type: "RESPONSE", message: { text: text.slice(0, 1990) } })
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error((d.error && d.error.message) || `Facebook error ${r.status}`);
+    rememberAdminSent(d.message_id);
+  }
+  pauseBot(psid);
+  if (!quiet) recordChat(psid, true, text, "admin");
+}
+
 app.post("/admin/api/send-image", requireAdmin, async (req, res) => {
   const b = req.body || {};
   const psid = String(b.psid || "");
   if (!/^(wa)?\d+$/.test(psid)) return res.status(400).json({ error: "Pick a conversation first." });
   const m = String(b.image || "").match(/^data:(image\/(?:png|jpe?g|webp|gif));base64,([A-Za-z0-9+/=]+)$/);
   if (!m) return res.status(400).json({ error: "Please choose a PNG or JPG image." });
-  let mime = m[1] === "image/jpg" ? "image/jpeg" : m[1];
+  const mime = m[1] === "image/jpg" ? "image/jpeg" : m[1];
   const buf = Buffer.from(m[2], "base64");
   if (buf.length > 8 * 1024 * 1024) return res.status(400).json({ error: "Image is too big (max 8 MB)." });
   let caption = String(b.caption || "").trim().slice(0, 1000);
@@ -1136,49 +1191,98 @@ app.post("/admin/api/send-image", requireAdmin, async (req, res) => {
   if (caption && b.translate && lang) {
     try { const t = (await translateTo(caption, lang)).slice(0, 1000); if (t) { capExtra = { en: caption, lang }; caption = t; } } catch (e) { /* send in English */ }
   }
-  const ext = mime === "image/png" ? "png" : mime === "image/webp" ? "webp" : mime === "image/gif" ? "gif" : "jpg";
   try {
-    let media, messageId;
-    if (isWa(psid)) {
-      const fd = new FormData();
-      fd.append("messaging_product", "whatsapp");
-      fd.append("type", mime);
-      fd.append("file", new Blob([buf], { type: mime }), `image.${ext}`);
-      const up = await fetch(`https://graph.facebook.com/v21.0/${WA_PHONE_NUMBER_ID}/media`, { method: "POST", headers: { Authorization: `Bearer ${WA_TOKEN}` }, body: fd });
-      const ud = await up.json().catch(() => ({}));
-      if (!up.ok || !ud.id) return res.status(502).json({ error: "WhatsApp didn't accept the image: " + ((ud.error && ud.error.message) || up.status) });
-      const data = await waSend(psid, { type: "image", image: caption ? { id: ud.id, caption } : { id: ud.id } });
-      if (!data) return res.status(502).json({ error: "WhatsApp didn't deliver the image. If the customer's last message was more than 24 hours ago, WhatsApp only allows template messages." });
-      messageId = data.messages && data.messages[0] && data.messages[0].id;
-      media = { src: "wa", id: ud.id, mime };
-    } else {
-      const fd = new FormData();
-      fd.append("recipient", JSON.stringify({ id: psid }));
-      fd.append("messaging_type", "RESPONSE");
-      fd.append("message", JSON.stringify({ attachment: { type: "image", payload: { is_reusable: false } } }));
-      fd.append("filedata", new Blob([buf], { type: mime }), `image.${ext}`);
-      const r = await fetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${encodeURIComponent(PAGE_ACCESS_TOKEN)}`, { method: "POST", body: fd });
-      const data = await r.json().catch(() => ({}));
-      if (!r.ok) return res.status(502).json({ error: (data.error && data.error.message) || `Facebook error ${r.status}` });
-      messageId = data.message_id; rememberAdminSent(messageId);
-      if (caption) {
-        const r2 = await fetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${encodeURIComponent(PAGE_ACCESS_TOKEN)}`, {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ recipient: { id: psid }, messaging_type: "RESPONSE", message: { text: caption } })
-        });
-        const d2 = await r2.json().catch(() => ({}));
-        if (r2.ok) rememberAdminSent(d2.message_id);
-      }
-      media = { src: "store", mime };
-    }
-    pauseBot(psid);
-    const key = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-    await storeSentImage(key, mime, buf);
-    media.key = key;
-    recordChat(psid, true, caption ? "(image) " + caption : "(image)", "admin", { media, ...(capExtra || {}) });
+    const messageId = await adminSendImage(psid, buf, mime, caption, capExtra);
     appendNote(psid, "[ADMIN UPDATE: The admin just sent the customer an image" + (caption ? ` with the message: "${caption.slice(0, 200)}"` : "") + ". If it was the eSIM QR code, help them install it if they ask.]");
     res.json({ ok: true, messageId });
   } catch (e) { console.error("[send-image] failed:", e.message); res.status(502).json({ error: e.message }); }
+});
+
+// ---- 1-tap eSIM delivery: buy on eSIMCard, send QR + install links, save ICCID ----
+// order:last:<psid> = the customer's latest order (saved when the bot creates it)
+async function saveLastOrder(psid, o) {
+  if (!hasDb()) { lastOrders.set(psid, o); return; }
+  await redis(["SET", `order:last:${psid}`, JSON.stringify(o), "EX", 60 * 24 * 3600]).catch((e) => console.error("[order] save failed:", e.message));
+}
+const lastOrders = new Map();
+async function getLastOrder(psid) {
+  if (!hasDb()) return lastOrders.get(psid) || null;
+  const v = await redis(["GET", `order:last:${psid}`]).catch(() => null);
+  try { return v ? JSON.parse(v) : null; } catch { return null; }
+}
+const deliveryLocks = new Set();
+
+app.get("/admin/api/plan-search", requireAdmin, (req, res) => {
+  res.json({ plans: findPlansByText(req.query.q, 15).map((p) => ({ planId: p.planId, name: p.name, destination: p.destination, price: p.price })) });
+});
+app.get("/admin/api/delivery", requireAdmin, async (req, res) => {
+  const psid = String(req.query.psid || "");
+  if (!/^(wa)?\d+$/.test(psid)) return res.status(400).json({ error: "Bad id." });
+  const order = await getLastOrder(psid);
+  const planId = String(req.query.planId || (order && order.planId) || "");
+  const plan = planId ? getPlan(planId) : null;
+  const out = { order, plan: plan ? { planId: plan.planId, name: plan.name, destination: plan.destination, price: plan.price } : null, apiConnected: esims.configured() };
+  if (plan && esims.configured()) {
+    try {
+      const raw = getRawPlan(plan.planId);
+      const pk = await esims.findPackage(plan.name, { retailUSD: raw && raw.retailPrice, costUSD: reseller.costOf(raw) });
+      if (pk && pk.ambiguous) out.packageError = `eSIMCard has ${pk.matches} packages named "${pk.name}" and the price didn't single one out. Deliver this one manually.`;
+      else out.package = pk;
+    } catch (e) { out.packageError = e.message; }
+    try { out.balanceUSD = await esims.accountBalance(); } catch (e) { /* optional */ }
+  }
+  res.json(out);
+});
+app.post("/admin/api/deliver", requireAdmin, async (req, res) => {
+  const b = req.body || {};
+  const psid = String(b.psid || "");
+  if (!/^(wa)?\d+$/.test(psid)) return res.status(400).json({ error: "Pick a conversation first." });
+  if (!esims.configured()) return res.status(400).json({ error: "ESIMCARD_TOKEN is not set in Render." });
+  const plan = getPlan(b.planId);
+  if (!plan) return res.status(400).json({ error: "Pick the plan first." });
+  if (deliveryLocks.has(psid)) return res.status(409).json({ error: "A delivery for this customer is already running. Wait a moment." });
+  deliveryLocks.add(psid);
+  try {
+    const rawPlan = getRawPlan(plan.planId);
+    const pkg = await esims.findPackage(plan.name, { retailUSD: rawPlan && rawPlan.retailPrice, costUSD: reseller.costOf(rawPlan) });
+    if (pkg && pkg.ambiguous) return res.status(400).json({ error: `eSIMCard has ${pkg.matches} packages with this name. Deliver this one manually.` });
+    if (!pkg) return res.status(400).json({ error: `eSIMCard has no package named "${plan.name}". Deliver this one manually.` });
+    if (String(b.packageId || "") !== pkg.id) return res.status(409).json({ error: "The package changed since you checked. Tap Check again." });
+    let sim;
+    try { sim = await esims.purchase(pkg.id); }
+    catch (e) { await notifyAdmin({ title: "eSIM purchase FAILED", message: `${await getCustomerName(psid)}\n${plan.name}\n${e.message}`, tags: "warning" }); return res.status(502).json({ error: e.message }); }
+    if (!sim.lpa && !sim.iccid) {
+      await notifyAdmin({ title: "eSIM bought, details missing", message: `${await getCustomerName(psid)}\n${plan.name}\nCheck eSIMCard "My eSIMs" and send the QR manually.`, tags: "warning" });
+      return res.status(502).json({ error: "The eSIM was bought, but eSIMCard didn't return the QR yet. Open eSIMCard > My eSIMs and send it manually (don't buy again).", bought: true });
+    }
+    const steps = [];
+    if (sim.lpa) {
+      const png = await QRCode.toBuffer(sim.lpa, { width: 720, margin: 3, errorCorrectionLevel: "M" });
+      await adminSendImage(psid, png, "image/png", `Your eSIM QR code: ${plan.name}`);
+      steps.push("qr");
+    }
+    const lines = [`✅ Your eSIM is ready! ${plan.name}`, ""];
+    if (sim.lpa) lines.push("📲 Scan the QR code above from another screen, or install it directly on this phone:");
+    if (sim.ios) lines.push(`🍎 iPhone: ${sim.ios}`);
+    if (sim.android) lines.push(`🤖 Android: ${sim.android}`);
+    if (sim.smdp && sim.matching) lines.push("", "Manual install:", `SM-DP+ address: ${sim.smdp}`, `Activation code: ${sim.matching}`);
+    if (sim.iccid) lines.push("", `🔖 ICCID: ${sim.iccid}`);
+    lines.push("", "Tips: install it on Wi-Fi before you travel (the QR usually works only once), then turn on the eSIM line and data roaming when you arrive.");
+    if (sim.iccid) lines.push("", `📊 Check your data anytime: https://3ukph.com/data?iccid=${sim.iccid}`);
+    await adminSendText(psid, lines.join("\n"));
+    steps.push("text");
+    const order = await getLastOrder(psid);
+    if (sim.iccid) {
+      try { await esims.addEsim(psid, { iccid: sim.iccid, plan: plan.name, email: (order && order.email) || "", note: "Auto-delivered" }); } catch (e) { console.error("[deliver] save ICCID:", e.message); }
+    }
+    await saveLastOrder(psid, { ...(order && order.planId === plan.planId ? order : { planId: plan.planId, plan: plan.name, price: plan.price, method: "(chosen in console)", at: new Date().toISOString() }), deliveredAt: new Date().toISOString(), iccid: sim.iccid || null });
+    appendNote(psid, `[ADMIN UPDATE: The customer's eSIM (${plan.name}${sim.iccid ? ", ICCID ending " + sim.iccid.slice(-4) : ""}) was just delivered with its QR code and install links. Help them install it if they ask. Use check_data_usage for data questions.]`);
+    notifyAdmin({ title: "eSIM delivered", message: `${await getCustomerName(psid)}\n${plan.name}${sim.iccid ? "\nICCID " + sim.iccid : ""}`, tags: "white_check_mark" }).catch(() => {});
+    res.json({ ok: true, iccid: sim.iccid || null, steps, costUSD: pkg.price });
+  } catch (e) {
+    console.error("[deliver] failed:", e.message);
+    res.status(502).json({ error: e.message });
+  } finally { deliveryLocks.delete(psid); }
 });
 
 // --- Reseller program (approve resellers, upload private costs) ---
@@ -1365,6 +1469,19 @@ app.get("/admin/esimcard-test", async (req, res) => {
   if (!esims.configured()) return res.type("text/plain").send("ESIMCARD_TOKEN is not set in Render yet.");
   try {
     const ic = esims.cleanIccid(req.query.iccid);
+    if (req.query.find) {
+      const plans = findPlansByText(req.query.find, 5);
+      const rows = [];
+      for (const pl of plans) {
+        const raw = getRawPlan(pl.planId);
+        rows.push({ planId: pl.planId, name: pl.name, ourPrice: pl.price, retailUSD: raw && raw.retailPrice, package: await esims.findPackage(pl.name, { retailUSD: raw && raw.retailPrice, costUSD: reseller.costOf(raw) }) });
+      }
+      return res.type("application/json").send(JSON.stringify(rows, null, 2));
+    }
+    if (req.query.pricing) {
+      const d = await esims.call("pricing");
+      return res.type("application/json").send(JSON.stringify(d, null, 2).slice(0, 4000));
+    }
     const out = ic ? await esims.usage(ic) : await esims.call("my-esims?page=1");
     res.type("application/json").send(JSON.stringify(out, null, 2).slice(0, 6000));
   } catch (e) { res.status(502).type("text/plain").send(e.message + (e.data ? "\n" + JSON.stringify(e.data).slice(0, 1500) : "")); }
@@ -1571,7 +1688,7 @@ async function getClaudeReply(senderId, userText) {
           let result;
           try {
             result = await runTool(block.name, block.input || {}, senderId);
-            if (block.name === "create_order" && result && result.ok) recordCustomerOrder(senderId, result.plan);
+            if (block.name === "create_order" && result && result.ok) { recordCustomerOrder(senderId, result.plan); saveLastOrder(senderId, { planId: String((block.input || {}).planId || ""), plan: result.plan, price: result.price, method: result.paymentMethod || (block.input || {}).paymentMethod || "", email: String((block.input || {}).email || ""), at: new Date().toISOString() }); }
           } catch (err) {
             console.error("[tool] Failed:", block.name, err);
             result = { error: "Tool failed: " + err.message };

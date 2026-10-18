@@ -159,6 +159,18 @@
           </div>
           <div class="status" id="esimStatus"></div>
         </div>
+        <div class="hidden" id="dlvBox" style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
+          <b>🚀 Deliver eSIM (1-tap)</b>
+          <p class="help" style="margin:4px 0 8px">Check the payment in your GCash/bank app first. Then tap <b>Buy &amp; send eSIM</b>: it buys the eSIM on eSIMCard, sends the QR code and install links to the customer, and saves the ICCID.</p>
+          <div id="dlvOrder" class="help" style="margin-bottom:8px"></div>
+          <div class="row" style="gap:6px">
+            <input type="text" id="dlvSearch" placeholder="Change plan: e.g. europe 20gb 30" style="max-width:260px">
+            <select id="dlvPick" style="max-width:360px"><option value="">— search to change the plan —</option></select>
+          </div>
+          <div id="dlvCheck" class="help" style="margin:8px 0"></div>
+          <div class="row"><button class="red" id="dlvBtn" disabled>Buy &amp; send eSIM</button></div>
+          <div class="status" id="dlvStatus"></div>
+        </div>
       </section>
     </div>
 
@@ -281,7 +293,7 @@
     $("sendBtn").textContent = "Send to " + (c.channel || "Messenger"); $("trRow").classList.add("hidden");
     $("resellerRow").classList.remove("hidden"); $("tierStatus").textContent = "";
     $("tierSelect").value = c.reseller || "none";
-    $("esimBox").classList.remove("hidden"); $("esimStatus").textContent = ""; loadEsims();
+    $("esimBox").classList.remove("hidden"); $("esimStatus").textContent = ""; loadEsims(); dlvLoad("");
     Array.prototype.forEach.call(document.querySelectorAll(".conv"), function (x) { x.classList.remove("active"); });
     loadMessages();
     clearInterval(pollTimer); pollTimer = setInterval(loadMessages, 4000);
@@ -450,6 +462,50 @@
       .catch(function (e) { $("sendStatus").className = "status err"; $("sendStatus").textContent = "Image not sent: " + e.message; })
       .then(function () { $("sendBtn").disabled = false; $("imgBtn").disabled = false; });
   }
+
+  // ---- 1-tap delivery ----
+  var dlv = null;
+  function dlvLoad(planId, keepStatus) {
+    if (!current) return;
+    $("dlvBox").classList.remove("hidden"); $("dlvBtn").disabled = true; if (!keepStatus) $("dlvStatus").textContent = "";
+    $("dlvCheck").textContent = "Checking eSIMCard…";
+    var psid = current.psid;
+    api("/admin/api/delivery?psid=" + encodeURIComponent(psid) + (planId ? "&planId=" + encodeURIComponent(planId) : "")).then(function (d) {
+      if (!current || current.psid !== psid) return;
+      dlv = d;
+      var o = d.order;
+      $("dlvOrder").innerHTML = o ? ("Latest order: <b>" + esc(o.plan) + "</b> · " + esc(o.price || "") + " · " + esc(o.method || "") + (o.email ? " · " + esc(o.email) : "") + " · " + fmt(o.at) + (o.deliveredAt ? ' · <b style="color:var(--ok)">✓ delivered ' + fmt(o.deliveredAt) + (o.iccid ? " (ICCID " + esc(o.iccid) + ")" : "") + "</b>" : "")) : "No order from the bot in this chat yet. Search for the plan below.";
+      if (!d.apiConnected) { $("dlvCheck").textContent = "eSIMCard isn't connected (ESIMCARD_TOKEN missing)."; return; }
+      if (!d.plan) { $("dlvCheck").textContent = "Pick a plan to deliver."; return; }
+      if (!d.package) { $("dlvCheck").innerHTML = "⚠️ <b>" + esc(d.plan.name) + "</b>: " + esc(d.packageError || "no matching package on eSIMCard. Deliver this one manually."); return; }
+      $("dlvCheck").innerHTML = "Will buy: <b>" + esc(d.package.name) + "</b>" + (d.package.price != null ? " · cost <b>$" + Number(d.package.price).toFixed(2) + "</b>" : "") + (d.balanceUSD != null ? " · eSIMCard balance $" + Number(d.balanceUSD).toFixed(2) : "") + " · customer price " + esc(d.plan.price);
+      $("dlvBtn").disabled = false;
+    }).catch(function (e) { $("dlvCheck").textContent = "Couldn't check: " + e.message; });
+  }
+  var dlvTimer = null;
+  $("dlvSearch").oninput = function () {
+    clearTimeout(dlvTimer); var q = this.value.trim();
+    dlvTimer = setTimeout(function () {
+      if (q.length < 3) return;
+      api("/admin/api/plan-search?q=" + encodeURIComponent(q)).then(function (d) {
+        $("dlvPick").innerHTML = '<option value="">— ' + d.plans.length + " plans found —</option>" + d.plans.map(function (p) { return '<option value="' + esc(p.planId) + '">' + esc(p.name) + " · " + esc(p.price) + "</option>"; }).join("");
+      });
+    }, 350);
+  };
+  $("dlvPick").onchange = function () { if (this.value) dlvLoad(this.value); };
+  $("dlvBtn").onclick = function () {
+    if (!dlv || !dlv.package || !current) return;
+    var o = dlv.order;
+    if (o && o.deliveredAt && o.planId === dlv.plan.planId && !confirm("This order was already delivered on " + fmt(o.deliveredAt) + ". Buy ANOTHER eSIM?")) return;
+    if (!confirm("Buy and send this eSIM to " + current.customerName + "?\n\n" + dlv.package.name + (dlv.package.price != null ? "\nCost: $" + Number(dlv.package.price).toFixed(2) + " from your eSIMCard balance" : "") + "\n\nOnly continue if the payment is confirmed.")) return;
+    $("dlvBtn").disabled = true; $("dlvStatus").className = "status"; $("dlvStatus").textContent = "Buying on eSIMCard and sending… (up to 30 seconds)";
+    api("/admin/api/deliver", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ psid: current.psid, planId: dlv.plan.planId, packageId: dlv.package.id }) })
+      .then(function (r) {
+        $("dlvStatus").className = "status ok"; $("dlvStatus").textContent = "✓ Delivered! QR and install links sent" + (r.iccid ? ". ICCID " + r.iccid + " saved." : ".");
+        loadMessages(); loadEsims(); setBotBadge(true); setTimeout(function () { dlvLoad(dlv.plan.planId, true); }, 1500);
+      })
+      .catch(function (e) { $("dlvStatus").className = "status err"; $("dlvStatus").textContent = "Not delivered: " + e.message; $("dlvBtn").disabled = false; });
+  };
 
   function send() {
     if (attached && current) return sendImage();

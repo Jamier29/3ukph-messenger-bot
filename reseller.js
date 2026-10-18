@@ -106,6 +106,11 @@ function tierMarkup(tier) {
 }
 
 // rawPlan: catalog entry (destination, name, validityDays, retailPrice in USD). rate: pesos per USD.
+function costOf(rawPlan) {
+  if (!rawPlan) return null;
+  const c = costs.get(costKey(rawPlan.destination, rawPlan.name, rawPlan.validityDays, rawPlan.retailPrice));
+  return c > 0 ? c : null;
+}
 function resellerPrice(rawPlan, tier, rate) {
   if (!rawPlan) return null;
   const cost = costs.get(costKey(rawPlan.destination, rawPlan.name, rawPlan.validityDays, rawPlan.retailPrice));
@@ -159,7 +164,7 @@ function getCostsInfo() {
   return { ...costsInfo, starterMarkupPercent: STARTER * 100, goldMarkupPercent: GOLD * 100, minResellerProfit: MIN_PROFIT };
 }
 
-module.exports = { init, costsFromWorkbook, saveCosts, resellerPrice, getMember, setMember, listMembers, getCostsInfo };
+module.exports = { costOf, init, costsFromWorkbook, saveCosts, resellerPrice, getMember, setMember, listMembers, getCostsInfo };
 
 // --- Wallet + purchase tracker ---------------------------------------------
 // Balance:  reseller:wallet:<psid>  (integer, in centavos, so no rounding drift)

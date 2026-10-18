@@ -63,9 +63,11 @@ async function findCustomerByIccid(iccid) {
 
 // ---- eSIMCard API --------------------------------------------------------
 let ext = null;
-async function api(path) {
+async function api(path, body) {
   if (!TOKEN) throw new Error("ESIMCARD_TOKEN is not set in Render.");
-  const r = await fetch(BASE + path, { headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json" }, signal: AbortSignal.timeout(20000) });
+  const opts = { headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json" }, signal: AbortSignal.timeout(body ? 60000 : 20000) };
+  if (body) { opts.method = "POST"; opts.headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(body); }
+  const r = await fetch(BASE + path, opts);
   const text = await r.text();
   let data; try { data = JSON.parse(text); } catch { data = { raw: text.slice(0, 300) }; }
   if (!r.ok) { const e = new Error(`eSIMCard ${r.status}: ${(data && (data.message || data.error)) || text.slice(0, 120)}`); e.status = r.status; e.data = data; throw e; }
@@ -78,7 +80,7 @@ async function extension() {
   if (!ext) throw new Error("eSIMCard token check didn't return an account type.");
   return ext;
 }
-async function call(path) { return api(`${await extension()}/${path}`); }
+async function call(path, body) { return api(`${await extension()}/${path}`, body); }
 
 // Find eSIMCard's own id for an ICCID (some accounts use ids, not ICCIDs, in URLs).
 async function findSimId(iccid) {
@@ -243,6 +245,104 @@ async function usage(iccid) {
     expires: life.expires || sum.expires || null, expiresEstimated: life.expiresEstimated, activated: life.activated, validityDays: life.validityDays, statusText: sum.status || life.statusText || null, raw, details: det };
 }
 
+
+// ---- Buying eSIMs (1-tap delivery from the Admin Console) ------------------
+// Our price list uses the same package names as eSIMCard, so packages are matched by name.
+let pricingCache = { at: 0, list: [] };
+function collectPackages(d) {
+  const out = [];
+  const seen = new Set();
+  (function walk(x, depth) {
+    if (!x || depth > 6) return;
+    if (Array.isArray(x)) { x.forEach((y) => walk(y, depth + 1)); return; }
+    if (typeof x !== "object") return;
+    const id = x.package_type_id || x.id || x.uuid;
+    const name = x.name || x.package_name || x.title;
+    if (id && name && typeof name === "string" && /\d/.test(name) && !seen.has(id)) {
+      seen.add(id);
+      const price = num(x.price ?? x.cost ?? x.reseller_price ?? x.amount ?? x.selling_price);
+      out.push({ id: String(id), name: name.trim(), price, country: x.country_name || x.country || x.destination || null, raw: x });
+    }
+    for (const v of Object.values(x)) if (v && typeof v === "object") walk(v, depth + 1);
+  })(d, 0);
+  return out;
+}
+async function packageList(force) {
+  if (!force && pricingCache.list.length && Date.now() - pricingCache.at < 6 * 3600000) return pricingCache.list;
+  const d = await call("pricing");
+  let list = collectPackages(d);
+  if (!list.length) list = collectPackages(await call("packages"));
+  if (list.length) pricingCache = { at: Date.now(), list };
+  return list;
+}
+const normName = (n) => String(n || "").toLowerCase().replace(/\s+/g, " ").trim();
+// Several packages can share one name (different networks/prices), so the price must match too.
+function priceValues(raw) {
+  const vals = [];
+  walk(raw, (k, v) => { if (/(price|cost|amount)/i.test(k)) { const n = num(v); if (n !== null && n > 0) vals.push(n); } });
+  return vals;
+}
+async function findPackage(name, hint = {}) {
+  let list = await packageList();
+  let hits = list.filter((p) => normName(p.name) === normName(name));
+  if (!hits.length) { list = await packageList(true); hits = list.filter((p) => normName(p.name) === normName(name)); }
+  if (!hits.length) return null;
+  if (hits.length > 1) {
+    const targets = [hint.retailUSD, hint.costUSD].filter((x) => x > 0);
+    const byPrice = hits.filter((h) => priceValues(h.raw).some((v) => targets.some((t) => Math.abs(v - t) < 0.015)));
+    if (byPrice.length === 1) hits = byPrice;
+    else return { ambiguous: true, matches: hits.length, name: hits[0].name };
+  }
+  const { raw, ...p } = hits[0];
+  return { ...p, matches: 1 };
+}
+async function accountBalance() {
+  for (const path of ["balance", "my-balance", "wallet"]) {
+    try {
+      const d = await call(path);
+      const v = num(d && (d.balance ?? (d.data && (d.data.balance ?? d.data.amount ?? d.data))));
+      if (v !== null) return v;
+    } catch (e) { /* try next */ }
+  }
+  return null;
+}
+// Pull ICCID + activation details out of an eSIMCard response (field names vary a little).
+function simInfo(obj) {
+  const f = {};
+  walk(obj, (k, v) => {
+    if (typeof v !== "string" && typeof v !== "number") return;
+    const s = String(v);
+    if (!f.iccid && /iccid/i.test(k) && isIccid(s)) f.iccid = cleanIccid(s);
+    if (!f.lpa && /^LPA:1\$/i.test(s)) f.lpa = s;
+    if (!f.smdp && /smdp/i.test(k) && s.length < 120) f.smdp = s;
+    if (!f.matching && /(matching_?id|activation_?code)/i.test(k) && s.length < 120 && !/^LPA/i.test(s)) f.matching = s;
+    if (!f.ios && /^universal_link$/i.test(k)) f.ios = s;
+    if (!f.android && /android_universal_link/i.test(k)) f.android = s;
+    if (!f.simId && /^id$/i.test(k) && /^[0-9a-f-]{20,}$/i.test(s)) f.simId = s;
+  });
+  if (!f.lpa && f.smdp && f.matching) f.lpa = `LPA:1$${f.smdp}$${f.matching}`;
+  if (f.lpa && (!f.smdp || !f.matching)) { const m = f.lpa.split("$"); f.smdp = f.smdp || m[1]; f.matching = f.matching || m[2]; }
+  return f;
+}
+// Buy one package. Returns { iccid, lpa, smdp, matching, ios, android, raw }.
+async function purchase(packageId) {
+  const startedAt = Date.now();
+  const before = await loadIndex().then((i) => new Set(i.map.keys())).catch(() => null);
+  const res = await call("package/purchase", { package_type_id: packageId });
+  if (res && res.status === false) throw new Error("eSIMCard refused the purchase: " + (res.message || JSON.stringify(res).slice(0, 200)));
+  let info = simInfo(res);
+  // Some purchases are processed a few seconds later: find the new eSIM in the account list.
+  for (let i = 0; i < 8 && !(info.iccid && info.lpa); i++) {
+    await new Promise((r) => setTimeout(r, 4000));
+    const idx = await loadIndex().catch(() => null);
+    if (!idx) continue;
+    const fresh = [...idx.map.entries()].filter(([ic, e]) => (before ? !before.has(ic) : Date.parse(e.created_at || 0) >= startedAt - 60000));
+    if (fresh.length === 1) info = { ...simInfo(fresh[0][1]), ...Object.fromEntries(Object.entries(info).filter(([, v]) => v)) };
+  }
+  simIndex.at = 0; // refresh the list next time
+  return { ...info, raw: res };
+}
+
 function configured() { return !!TOKEN; }
 
-module.exports = { init, isIccid, cleanIccid, listEsims, addEsim, removeEsim, findCustomerByIccid, usage, details, findEntry, configured, call };
+module.exports = { packageList, findPackage, accountBalance, purchase, simInfo, init, isIccid, cleanIccid, listEsims, addEsim, removeEsim, findCustomerByIccid, usage, details, findEntry, configured, call };

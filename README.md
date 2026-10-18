@@ -192,3 +192,11 @@ link can download it.
 - Link straight to one eSIM: 3ukph.com/data?iccid=89...
 - Expiry comes from eSIMCard when it provides it; otherwise it is estimated from activation date + plan days,
   or the pop-up shows the plan's validity.
+
+## 1-tap eSIM delivery (Admin Console)
+- In a chat, the "Deliver eSIM" card shows the customer's latest order (saved when the bot creates it).
+- After checking the payment, tap "Buy & send eSIM": buys the package on eSIMCard (POST package/purchase,
+  matched by name + price), sends a QR code image + iPhone/Android install links + ICCID, and saves the ICCID.
+- Safety: confirm dialog with cost, one delivery at a time per chat, warns if the order was already delivered,
+  refuses when several eSIMCard packages share the name and the price doesn't single one out.
+- Check matching without buying: /admin/esimcard-test?key=ADMIN_KEY&find=europe%2020gb%2030
