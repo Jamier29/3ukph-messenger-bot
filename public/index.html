@@ -1619,12 +1619,11 @@ nav a.uk-btn-ghost{white-space:nowrap}
       expL.textContent = days<0 ? 'Expired on' : 'Expires';
       exp.textContent=(j.expiresEstimated?'~ ':'')+fmtDate(d);
       expSub.textContent = days<0 ? 'Plan has ended' : days===0 ? 'Today, '+fmtTime(d) : days===1 ? '1 day left' : days+' days left';
-    } else if(j.state==='not_active'){
-      expL.textContent='Validity'; exp.textContent=j.validityDays?j.validityDays+' days':'Not started';
-      expSub.textContent='Starts when it first connects abroad';
     } else {
-      expL.textContent='Validity'; exp.textContent=j.validityDays?j.validityDays+'-day plan':'—';
-      expSub.textContent='Counted from first connection';
+      var bought = j.purchasedAt ? 'Bought '+fmtDate(new Date(j.purchasedAt)) : '';
+      expL.textContent='Validity';
+      exp.textContent = j.validityDays ? j.validityDays+' days' : '—';
+      expSub.textContent = (j.state==='not_active' ? 'Starts when it first connects abroad' : 'Counted from first connection') + (bought ? ' · '+bought : '');
     }
     // Warnings
     var w=$('dcWarn'), msg='';

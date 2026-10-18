@@ -630,7 +630,7 @@ async function runTool(name, input, senderId) {
         try {
           const u = await esims.usage(ic);
           const rec = list.find((e) => e.iccid === ic);
-          results.push({ iccidEnding: ic.slice(-4), plan: (rec && rec.plan) || u.bundle || undefined, total: u.total, used: u.used, remaining: u.remaining, percentUsed: u.percentUsed, unlimited: u.unlimited, status: u.status, expires: u.expires });
+          results.push({ iccidEnding: ic.slice(-4), plan: (rec && rec.plan) || u.bundle || undefined, total: u.total, used: u.used, remaining: u.remaining, percentUsed: u.percentUsed, unlimited: u.unlimited, status: u.statusText || u.status, expires: u.expires, purchased: u.purchasedAt ? u.purchasedAt.slice(0, 10) : undefined, validity: (u.bundle && (u.bundle.match(/\d+\s*days?/i) || [])[0]) || undefined, note: u.expires ? undefined : "Plan days count from the eSIM's first connection; there's no fixed end date to quote." });
         } catch (e) {
           console.error("[esims] usage failed:", e.message);
           results.push({ iccidEnding: ic.slice(-4), error: "Couldn't read usage right now." });
@@ -1227,6 +1227,9 @@ app.get("/api/data-check", async (req, res) => {
   const lim = dcLimited(dcClientIp(req));
   if (lim) return res.status(429).json({ error: "rate_limited", message: lim === "busy" ? "Lots of people are checking right now. Please try again in a few minutes." : "Too many checks from this device. Please wait about 10 minutes and try again." });
   if (!esims.configured()) return res.status(503).json({ error: "unavailable", message: "Data checking is temporarily unavailable. Message us on WhatsApp and we'll check for you." });
+  // Only our own eSIMs: the ICCID must be on our eSIMCard account list.
+  const onList = await esims.findEntry(ic);
+  if (onList.found === false) return res.status(404).json({ error: "not_found", message: "We couldn't find a 3UKPH eSIM with that ICCID. Please check the number, or message us on WhatsApp." });
   let u;
   try { u = await esims.usage(ic); }
   catch (e) {
@@ -1236,10 +1239,10 @@ app.get("/api/data-check", async (req, res) => {
       ? { error: "not_found", message: "We couldn't find a 3UKPH eSIM with that ICCID. Please check the number, or message us on WhatsApp." }
       : { error: "unavailable", message: "We couldn't reach the network just now. Please try again in a minute." });
   }
-  let plan = u.bundle || null, deliveredAt = null;
+  let plan = u.bundle || null, deliveredAt = null; const apiPlan = u.bundle || null;
   try {
     const owner = await esims.findCustomerByIccid(ic);
-    if (owner) { const rec = (await esims.listEsims(owner)).find((e) => e.iccid === ic); if (rec) { plan = rec.plan || plan; deliveredAt = rec.addedAt || null; } }
+    if (owner) { const rec = (await esims.listEsims(owner)).find((e) => e.iccid === ic); if (rec) { plan = apiPlan || rec.plan || plan; deliveredAt = rec.addedAt || null; } }
   } catch (e) { /* records are optional */ }
   const st = String(u.statusText || "").toLowerCase();
   const expMs = u.expires ? Date.parse(u.expires) : NaN;
@@ -1247,12 +1250,13 @@ app.get("/api/data-check", async (req, res) => {
   let state = "active";
   if ((Number.isFinite(expMs) && expMs < Date.now()) || /expir/.test(st)) state = "expired";
   else if (remainingZero || /deplet|exhaust|used.?up|finish/.test(st)) state = "used_up";
-  else if (/not.?activ|inactive|pending|new|unused|ready|released|not.?install/.test(st) || (u.percentUsed === 0 && !u.activated && /^(|null)$/.test(st))) state = "not_active";
+  else if (/not.?activ|inactive|pending|new|unused|ready|released|not.?install/.test(st) || (!u.unlimited && /^0(\.0+)?\s*(MB|GB)$/i.test(String(u.used || "")))) state = "not_active";
   const body = {
     ok: true, iccidEnding: ic.slice(-4), plan,
     total: u.total, used: u.used, remaining: u.remaining, percentUsed: u.percentUsed, unlimited: !!u.unlimited,
     state, expires: Number.isFinite(expMs) ? new Date(expMs).toISOString() : null, expiresEstimated: !!u.expiresEstimated,
-    activated: u.activated || null, validityDays: u.validityDays || validityFromPlan(plan), deliveredAt,
+    activated: u.activated || u.installedAt || null, validityDays: validityFromPlan(plan) || u.validityDays || null, deliveredAt,
+    purchasedAt: u.purchasedAt || deliveredAt || null,
     checkedAt: new Date().toISOString()
   };
   dcCache.set(ic, { at: Date.now(), body });

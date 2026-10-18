@@ -188,33 +188,38 @@ function lifecycle(...raws) {
 
 // SIM details (packages, dates). Best effort; cached because dates rarely change.
 const detailCache = new Map();
+// Index of all eSIMs on the account (iccid -> list entry), from my-esims pages.
+let simIndex = { at: 0, map: new Map(), ok: false };
+async function loadIndex() {
+  const map = new Map();
+  for (let page = 1; page <= 40; page++) {
+    const d = await call(`my-esims?page=${page}`);
+    const list = Array.isArray(d) ? d : (d.data && Array.isArray(d.data) ? d.data : (d.data && Array.isArray(d.data.data) ? d.data.data : []));
+    for (const x of list) { const ic = cleanIccid(x.iccid || (x.sim && x.sim.iccid)); if (ic) map.set(ic, x); }
+    const last = d && (d.last_page || (d.meta && d.meta.last_page) || (d.data && d.data.last_page));
+    if (!list.length || (last && page >= last)) break;
+  }
+  simIndex = { at: Date.now(), map, ok: true };
+  return simIndex;
+}
+// Returns { found: true, entry } / { found: false } / { found: null } when the list can't be read.
+async function findEntry(iccid) {
+  iccid = cleanIccid(iccid);
+  try {
+    if (!simIndex.ok || Date.now() - simIndex.at > 10 * 60000) await loadIndex();
+    let e = simIndex.map.get(iccid);
+    if (!e && Date.now() - simIndex.at > 60000) { await loadIndex(); e = simIndex.map.get(iccid); }
+    return e ? { found: true, entry: e } : { found: false };
+  } catch (err) {
+    console.error("[esimcard] list failed:", err.message);
+    return { found: null };
+  }
+}
+
 async function details(iccid) {
   iccid = cleanIccid(iccid);
-  const c = detailCache.get(iccid);
-  if (c && Date.now() - c.at < 30 * 60000) return c.data;
-  const data = { tried: {} };
-  const attempt = async (key, path) => {
-    try { data[key] = await call(path); data.tried[path] = "ok"; return true; }
-    catch (e) { data.tried[path] = String(e.message || e).slice(0, 80); return false; }
-  };
-  await attempt("sim", `my-sim/${iccid}`);
-  // The list of our eSIMs usually carries dates/packages for each SIM.
-  try {
-    for (let page = 1; page <= 10; page++) {
-      const d = await call(`my-esims?page=${page}`);
-      const list = Array.isArray(d) ? d : (d.data && Array.isArray(d.data) ? d.data : (d.data && Array.isArray(d.data.data) ? d.data.data : []));
-      const hit = list.find((x) => cleanIccid(x.iccid || (x.sim && x.sim.iccid)) === iccid);
-      if (hit) { data.listEntry = hit; break; }
-      if (!list.length) break;
-    }
-    data.tried["my-esims"] = data.listEntry ? "ok" : "not in list";
-  } catch (e) { data.tried["my-esims"] = String(e.message || e).slice(0, 80); }
-  const id = data.listEntry && (data.listEntry.id || data.listEntry.sim_id || data.listEntry.uuid);
-  if (id && !data.sim) await attempt("sim", `my-sim/${id}`);
-  if (id) await attempt("packages", `my-sim/${id}/packages`);
-  else await attempt("packages", `my-sim/${iccid}/packages`);
-  detailCache.set(iccid, { at: Date.now(), data });
-  return data;
+  const f = await findEntry(iccid);
+  return { found: f.found, listEntry: f.entry || null };
 }
 
 async function usage(iccid) {
@@ -230,10 +235,14 @@ async function usage(iccid) {
   const sum = summarize(raw);
   let det = null;
   try { det = await details(iccid); } catch { det = null; }
+  const le = (det && det.listEntry) || {};
   const life = lifecycle(raw, det);
-  return { iccid, ...sum, bundle: sum.bundle || life.name || undefined, expires: life.expires || sum.expires || null, expiresEstimated: life.expiresEstimated, activated: life.activated, validityDays: life.validityDays, statusText: sum.status || life.statusText || null, raw, details: det };
+  return { iccid, ...sum, onAccount: det ? det.found : null, bundle: le.last_bundle || sum.bundle || life.name || undefined,
+    purchasedAt: (parseDate(le.created_at) || {}).toISOString ? parseDate(le.created_at).toISOString() : null,
+    installedAt: (parseDate(le.installed_at) || {}).toISOString ? parseDate(le.installed_at).toISOString() : null,
+    expires: life.expires || sum.expires || null, expiresEstimated: life.expiresEstimated, activated: life.activated, validityDays: life.validityDays, statusText: sum.status || life.statusText || null, raw, details: det };
 }
 
 function configured() { return !!TOKEN; }
 
-module.exports = { init, isIccid, cleanIccid, listEsims, addEsim, removeEsim, findCustomerByIccid, usage, details, configured, call };
+module.exports = { init, isIccid, cleanIccid, listEsims, addEsim, removeEsim, findCustomerByIccid, usage, details, findEntry, configured, call };
