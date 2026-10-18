@@ -63,9 +63,9 @@ async function findCustomerByIccid(iccid) {
 
 // ---- eSIMCard API --------------------------------------------------------
 let ext = null;
-async function api(path, body) {
+async function api(path, body, timeoutMs) {
   if (!TOKEN) throw new Error("ESIMCARD_TOKEN is not set in Render.");
-  const opts = { headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json" }, signal: AbortSignal.timeout(body ? 60000 : 20000) };
+  const opts = { headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json" }, signal: AbortSignal.timeout(timeoutMs || (body ? 60000 : 20000)) };
   if (body) { opts.method = "POST"; opts.headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(body); }
   const r = await fetch(BASE + path, opts);
   const text = await r.text();
@@ -267,14 +267,26 @@ function collectPackages(d) {
   })(d, 0);
   return out;
 }
+let pricingInflight = null;
 async function packageList(force) {
-  if (!force && pricingCache.list.length && Date.now() - pricingCache.at < 6 * 3600000) return pricingCache.list;
-  const d = await call("pricing");
-  let list = collectPackages(d);
-  if (!list.length) list = collectPackages(await call("packages"));
-  if (list.length) pricingCache = { at: Date.now(), list };
-  return list;
+  const age = Date.now() - pricingCache.at;
+  if (pricingCache.at && age < (pricingCache.list.length ? 6 * 3600000 : 5 * 60000) && !(force && age > 10 * 60000)) return pricingCache.list;
+  if (pricingInflight) return pricingInflight;
+  pricingInflight = (async () => {
+    const t0 = Date.now();
+    let list = [];
+    try {
+      const d = await api(`${await extension()}/pricing`, undefined, 90000);
+      list = collectPackages(d);
+      pricingCache.shape = Array.isArray(d) ? "array" : Object.keys(d || {}).join(",");
+    } catch (e) { pricingCache.error = e.message; console.error("[esimcard] pricing failed:", e.message); }
+    pricingCache = { ...pricingCache, at: Date.now(), list, ms: Date.now() - t0 };
+    console.log(`[esimcard] pricing: ${list.length} packages in ${pricingCache.ms} ms`);
+    return list;
+  })().finally(() => { pricingInflight = null; });
+  return pricingInflight;
 }
+function pricingStatus() { return { packages: pricingCache.list.length, loadedAt: pricingCache.at ? new Date(pricingCache.at).toISOString() : null, ms: pricingCache.ms, shape: pricingCache.shape, error: pricingCache.error, sample: pricingCache.list.slice(0, 2).map((p) => p.raw) }; }
 const normName = (n) => String(n || "").toLowerCase().replace(/\s+/g, " ").trim();
 // Several packages can share one name (different networks/prices), so the price must match too.
 function priceValues(raw) {
@@ -345,4 +357,4 @@ async function purchase(packageId) {
 
 function configured() { return !!TOKEN; }
 
-module.exports = { packageList, findPackage, accountBalance, purchase, simInfo, init, isIccid, cleanIccid, listEsims, addEsim, removeEsim, findCustomerByIccid, usage, details, findEntry, configured, call };
+module.exports = { pricingStatus, packageList, findPackage, accountBalance, purchase, simInfo, init, isIccid, cleanIccid, listEsims, addEsim, removeEsim, findCustomerByIccid, usage, details, findEntry, configured, call };

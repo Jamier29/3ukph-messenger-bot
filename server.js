@@ -1223,6 +1223,8 @@ app.get("/admin/api/delivery", requireAdmin, async (req, res) => {
   const plan = planId ? getPlan(planId) : null;
   const out = { order, plan: plan ? { planId: plan.planId, name: plan.name, destination: plan.destination, price: plan.price } : null, apiConnected: esims.configured() };
   if (plan && esims.configured()) {
+    const ready = await Promise.race([esims.packageList().then(() => true), new Promise((r) => setTimeout(() => r(false), 20000))]);
+    if (!ready) { out.packageError = "Loading the eSIMCard price list (first time takes up to a minute). Pick the plan again in a minute."; return res.json(out); }
     try {
       const raw = getRawPlan(plan.planId);
       const pk = await esims.findPackage(plan.name, { retailUSD: raw && raw.retailPrice, costUSD: reseller.costOf(raw) });
@@ -1469,18 +1471,18 @@ app.get("/admin/esimcard-test", async (req, res) => {
   if (!esims.configured()) return res.type("text/plain").send("ESIMCARD_TOKEN is not set in Render yet.");
   try {
     const ic = esims.cleanIccid(req.query.iccid);
-    if (req.query.find) {
-      const plans = findPlansByText(req.query.find, 5);
+    if (req.query.find || req.query.pricing) {
+      // Load the eSIMCard price list in the background; this page never waits more than 20 s.
+      const ready = await Promise.race([esims.packageList().then(() => true), new Promise((r) => setTimeout(() => r(false), 20000))]);
+      const st = esims.pricingStatus();
+      if (!ready) return res.type("text/plain").send("Still downloading the eSIMCard price list (it's big). Wait 1 minute and refresh this page.");
+      if (req.query.pricing || !st.packages) return res.type("application/json").send(JSON.stringify(st, null, 2).slice(0, 5000));
       const rows = [];
-      for (const pl of plans) {
+      for (const pl of findPlansByText(req.query.find, 4)) {
         const raw = getRawPlan(pl.planId);
         rows.push({ planId: pl.planId, name: pl.name, ourPrice: pl.price, retailUSD: raw && raw.retailPrice, package: await esims.findPackage(pl.name, { retailUSD: raw && raw.retailPrice, costUSD: reseller.costOf(raw) }) });
       }
-      return res.type("application/json").send(JSON.stringify(rows, null, 2));
-    }
-    if (req.query.pricing) {
-      const d = await esims.call("pricing");
-      return res.type("application/json").send(JSON.stringify(d, null, 2).slice(0, 4000));
+      return res.type("application/json").send(JSON.stringify({ priceList: { packages: st.packages, loadedIn: st.ms + " ms" }, rows }, null, 2));
     }
     const out = ic ? await esims.usage(ic) : await esims.call("my-esims?page=1");
     res.type("application/json").send(JSON.stringify(out, null, 2).slice(0, 6000));
