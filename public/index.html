@@ -1400,12 +1400,15 @@ nav a.uk-btn-ghost{white-space:nowrap}
 @media(min-width:640px){.dc-back{align-items:center;padding:24px}}
 .dc{position:relative;width:100%;max-width:440px;max-height:calc(100vh - 24px);overflow:auto;background:var(--surface);color:var(--ink);border-radius:var(--radius-lg);box-shadow:0 24px 70px rgba(0,0,0,.4);font-family:var(--font-sans);transform:translateY(24px);transition:transform .22s}
 .dc-back.open .dc{transform:none}
-.dc-head{display:flex;align-items:center;gap:12px;padding:18px 18px 14px;background:linear-gradient(135deg,#00166a,#012ca5);color:#fff;border-radius:var(--radius-lg) var(--radius-lg) 0 0}
+.dc-head{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:12px;padding:18px 18px 14px;background:linear-gradient(135deg,#00166a,#012ca5);color:#fff;border-radius:var(--radius-lg) var(--radius-lg) 0 0}
 .dc-head svg{width:30px;height:30px;flex:none;color:#f8c830}
 .dc-head h3{margin:0;font-size:19px;line-height:1.2;color:#fff}
 .dc-head p{margin:2px 0 0;font-size:13px;color:#d6dcf5}
 .dc-x{margin-left:auto;background:rgba(255,255,255,.14);border:0;color:#fff;width:36px;height:36px;border-radius:50%;font:700 20px/1 var(--font-sans);cursor:pointer;flex:none}
 .dc-x:hover{background:rgba(255,255,255,.26)}
+.dc-x{width:44px;height:44px;font-size:24px}
+.dc-home{display:block;width:100%;margin-top:10px;background:none;border:0;color:var(--ink-muted);font:700 15px var(--font-sans);padding:12px;cursor:pointer;text-decoration:underline}
+@media(max-height:780px){.dc-gauge{width:150px;height:150px}.dc-gc b{font-size:26px}}
 .dc-body{padding:18px}
 .dc-view{display:none}.dc-view.on{display:block}
 .dc label.dc-l{display:block;font-weight:700;font-size:14px;margin-bottom:6px}
@@ -1518,6 +1521,7 @@ nav a.uk-btn-ghost{white-space:nowrap}
           <button type="button" class="dc-btn alt" id="dcAnother">Check another</button>
         </div>
         <div class="dc-foot" id="dcFoot"></div>
+        <button type="button" class="dc-home" data-dc-close>Close and go back to the website</button>
       </div>
       <!-- error -->
       <div class="dc-view" id="dcErr">
@@ -1526,6 +1530,7 @@ nav a.uk-btn-ghost{white-space:nowrap}
           <p id="dcErrMsg">Something went wrong.</p>
           <button type="button" class="dc-btn" id="dcRetry">Try again</button>
           <div class="dc-row"><a class="dc-btn wa" id="dcHelp" target="_blank" rel="noopener" data-direct href="https://api.whatsapp.com/send?phone=639347069356">Ask us on WhatsApp</a></div>
+          <button type="button" class="dc-home" data-dc-close>Close</button>
         </div>
       </div>
     </div>
@@ -1563,9 +1568,12 @@ nav a.uk-btn-ghost{white-space:nowrap}
     if(prefill){inp.value=prefill;} else if(!inp.value){var l=store(); if(l.length)inp.value=l[0];}
     onInput(); show('dcForm');
     back.classList.add('open'); back.setAttribute('aria-hidden','false'); document.documentElement.style.overflow='hidden';
+    try{ if(!(history.state&&history.state.dc)) history.pushState({dc:1},'',location.pathname+location.search+'#check-data'); }catch(e){}
     setTimeout(function(){ if(auto&&valid(clean(inp.value))) check(clean(inp.value)); else inp.focus(); },60);
   }
-  function close(){
+  function close(fromPop){
+    if(!back.classList.contains('open'))return;
+    if(fromPop!==true){ try{ if(history.state&&history.state.dc){ history.back(); return; } }catch(e){} }
     back.classList.remove('open'); back.setAttribute('aria-hidden','true'); document.documentElement.style.overflow='';
     if(location.hash==='#check-data'){try{history.replaceState(null,'',location.pathname+location.search.replace(/([?&])iccid=\d+&?/,'$1').replace(/[?&]$/,''));}catch(e){}}
     if(lastFocus&&lastFocus.focus)lastFocus.focus();
@@ -1648,6 +1656,8 @@ nav a.uk-btn-ghost{white-space:nowrap}
   $('dcAnother').addEventListener('click',function(){inp.value='';onInput();renderSaved();show('dcForm');inp.focus();});
   $('dcRetry').addEventListener('click',function(){ if(current&&errKind!=='not_found'&&errKind!=='bad_iccid') check(current); else {show('dcForm');inp.focus();inp.select();} });
   $('dcX').addEventListener('click',close);
+  [].forEach.call(document.querySelectorAll('[data-dc-close]'),function(b){b.addEventListener('click',close);});
+  window.addEventListener('popstate',function(){ if(back.classList.contains('open')) close(true); });
   back.addEventListener('click',function(e){if(e.target===back)close();});
   document.addEventListener('keydown',function(e){
     if(!back.classList.contains('open'))return;
@@ -1658,7 +1668,7 @@ nav a.uk-btn-ghost{white-space:nowrap}
     var t=e.target.closest&&e.target.closest('[data-dc],a[href="#check-data"],a[href="/data"]');
     if(!t||t.closest('#dcBack'))return; e.preventDefault(); open('',false);
   });
-  window.addEventListener('hashchange',function(){if(location.hash==='#check-data'&&!back.classList.contains('open'))open('',false);});
+  window.addEventListener('hashchange',function(){if(location.hash==='#check-data'&&!back.classList.contains('open')&&!(history.state&&history.state.dc))open('',false);});
   var q=(location.search.match(/[?&]iccid=(\d{18,22})/)||[])[1];
   if(location.hash==='#check-data'||q) open(q||'', !!q);
 })();
