@@ -1271,13 +1271,12 @@ app.post("/admin/api/deliver", requireAdmin, async (req, res) => {
       await adminSendImage(psid, png, "image/png", `Your eSIM QR code: ${plan.name}`);
       steps.push("qr");
     }
-    const lines = [`✅ Your eSIM is ready! ${plan.name}`, ""];
-    if (sim.lpa) lines.push("📲 Scan the QR code above from another screen, or install it directly on this phone:");
-    if (sim.ios) lines.push(`🍎 iPhone: ${sim.ios}`);
-    if (sim.android) lines.push(`🤖 Android: ${sim.android}`);
-    if (sim.smdp && sim.matching) lines.push("", "Manual install:", `SM-DP+ address: ${sim.smdp}`, `Activation code: ${sim.matching}`);
+    const lines = [`✅ Your eSIM is ready! ${plan.name}`, "", "📲 How to install (on Wi-Fi, before you travel):", "1️⃣ Easiest: scan the QR code above using your phone's eSIM settings (show it on another screen or ask someone to show it)."];
+    lines.push("2️⃣ Only this one phone? Save the QR image. iPhone: open it in Photos, press and hold the QR, tap \"Add eSIM\". Android: Settings › SIM manager › Add eSIM › Scan QR › tap the gallery icon and pick the image.");
+    if (sim.ios) lines.push(`3️⃣ iPhone (iOS 17.4+) one-tap link, open it in Safari: ${sim.ios}`);
+    if (sim.smdp && sim.matching) lines.push("", "Or type it in manually (Add eSIM › Enter details manually):", `SM-DP+ address: ${sim.smdp}`, `Activation code: ${sim.matching}`);
     if (sim.iccid) lines.push("", `🔖 ICCID: ${sim.iccid}`);
-    lines.push("", "Tips: install it on Wi-Fi before you travel (the QR usually works only once), then turn on the eSIM line and data roaming when you arrive.");
+    lines.push("", "The QR usually works only once, so don't delete the eSIM after installing. When you arrive, turn on the eSIM line and data roaming.", "Need help? Just reply here 💬");
     if (sim.iccid) lines.push("", `📊 Check your data anytime: https://3ukph.com/data?iccid=${sim.iccid}`);
     await adminSendText(psid, lines.join("\n"));
     steps.push("text");
