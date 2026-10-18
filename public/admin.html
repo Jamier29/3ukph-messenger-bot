@@ -174,6 +174,21 @@
       </section>
     </div>
 
+    <!-- Pending orders + WhatsApp follow-ups -->
+    <section class="card">
+      <span class="step">Pending orders</span>
+      <h2>Unpaid orders &amp; follow-ups</h2>
+      <p class="help">Customers who ordered but haven't been delivered yet (last 7 days). On WhatsApp, the assistant sends <b>one</b> friendly follow-up if a customer goes quiet after getting a price or ordering, only inside WhatsApp's free 24-hour window, never after "no / later", and never while you're replying.</p>
+      <div class="row" style="margin-bottom:10px">
+        <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="fuOn"> WhatsApp auto follow-up</label>
+        <label style="display:flex;align-items:center;gap:6px">after <input type="number" id="fuHours" min="1" max="20" style="width:70px"> hours of silence</label>
+        <button class="ghost" id="fuSave">Save</button>
+        <button class="ghost" id="poRefresh">Refresh list</button>
+      </div>
+      <div class="status" id="fuStatus"></div>
+      <div id="poList" class="help">Loading…</div>
+    </section>
+
     <!-- ICCID lookup -->
     <section class="card">
       <span class="step">eSIM lookup</span>
@@ -257,7 +272,7 @@
       $("pageBox").innerHTML = (p.picture ? '<img src="' + esc(p.picture) + '" alt="">' : "") +
         '<div><b style="font-size:18px">' + esc(p.name) + '</b><br><span class="help">' + esc(p.category) + ' · Page ID ' + esc(p.id) +
         '</span><br><span class="badge ok">✓ Connected to Messenger</span></div>';
-      loadConversations();
+      loadConversations(); loadPending();
       loadResellers();
     }).catch(function (e) {
       $("loginStatus").textContent = e.message; $("loginStatus").className = "status err";
@@ -462,6 +477,27 @@
       .catch(function (e) { $("sendStatus").className = "status err"; $("sendStatus").textContent = "Image not sent: " + e.message; })
       .then(function () { $("sendBtn").disabled = false; $("imgBtn").disabled = false; });
   }
+
+  // ---- Pending orders & follow-up settings ----
+  function loadPending() {
+    api("/admin/api/followup-settings").then(function (st) { $("fuOn").checked = !!st.enabled; $("fuHours").value = st.hours; }).catch(function () {});
+    api("/admin/api/pending-orders").then(function (d) {
+      if (!d.orders.length) { $("poList").innerHTML = "No unpaid orders right now. 🎉"; return; }
+      $("poList").innerHTML = '<table class="ledger"><tr><th>Customer</th><th>Plan</th><th>Ordered</th><th>Status</th></tr>' + d.orders.map(function (o, i) {
+        var st = o.paymentProof ? '<b style="color:var(--ok)">💳 Payment screenshot sent: deliver now</b>' : (o.followupAt ? "Followed up " + fmt(o.followupAt) : (o.channel === "WhatsApp" ? "Waiting for payment" : "Waiting (Messenger: no auto follow-up)"));
+        return '<tr class="po" data-i="' + i + '" style="cursor:pointer"><td><b>' + esc(o.customerName) + "</b><br><span>" + esc(o.channel) + "</span></td><td>" + esc(o.plan) + "<br><span>" + esc(o.price || "") + " · " + esc(o.method || "") + "</span></td><td>" + fmt(o.at) + "</td><td>" + st + "</td></tr>";
+      }).join("") + "</table>";
+      Array.prototype.forEach.call(document.querySelectorAll("#poList tr.po"), function (tr) {
+        tr.onclick = function () { var o = d.orders[+tr.getAttribute("data-i")]; openConversation({ id: o.psid, psid: o.psid, customerName: o.customerName, channel: o.channel }); window.scrollTo({ top: $("thread").getBoundingClientRect().top + window.scrollY - 120, behavior: "smooth" }); };
+      });
+    }).catch(function (e) { $("poList").textContent = "Couldn't load: " + e.message; });
+  }
+  $("fuSave").onclick = function () {
+    api("/admin/api/followup-settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: $("fuOn").checked, hours: +$("fuHours").value }) })
+      .then(function (st) { $("fuStatus").className = "status ok"; $("fuStatus").textContent = "✓ Saved: follow-up " + (st.enabled ? "ON, after " + st.hours + " h" : "OFF"); })
+      .catch(function (e) { $("fuStatus").className = "status err"; $("fuStatus").textContent = e.message; });
+  };
+  $("poRefresh").onclick = loadPending;
 
   // ---- 1-tap delivery ----
   var dlv = null;

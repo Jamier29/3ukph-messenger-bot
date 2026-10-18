@@ -1297,6 +1297,97 @@ app.post("/admin/api/deliver", requireAdmin, async (req, res) => {
   } finally { deliveryLocks.delete(psid); }
 });
 
+// ---- Automatic follow-up (WhatsApp only) -------------------------------------
+// One friendly nudge when a WhatsApp customer got a price or placed an order but went quiet
+// without sending a payment screenshot. Inside WhatsApp's free 24-hour window, once per stall,
+// never after "no / later / cancel", never while the admin is handling the chat.
+const FOLLOWUP_HOURS = Math.max(1, Number(process.env.FOLLOWUP_HOURS || 2));
+const followupMem = new Map();
+async function followupSettings() {
+  const def = { enabled: true, hours: FOLLOWUP_HOURS };
+  if (!hasDb()) return followupMem.get("settings") || def;
+  const v = await redis(["GET", "settings:followup"]).catch(() => null);
+  try { return v ? { ...def, ...JSON.parse(v) } : def; } catch { return def; }
+}
+async function getFollowup(psid) {
+  if (!hasDb()) return followupMem.get(psid) || null;
+  const v = await redis(["GET", `followup:${psid}`]).catch(() => null);
+  try { return v ? JSON.parse(v) : null; } catch { return null; }
+}
+async function setFollowup(psid, rec) {
+  if (!hasDb()) { followupMem.set(psid, rec); return; }
+  await redis(["SET", `followup:${psid}`, JSON.stringify(rec), "EX", 30 * 24 * 3600]).catch(() => {});
+}
+const NOT_INTERESTED = /\b(no thanks|not interested|not now|later|next time|never ?mind|cancel|stop|ayaw|wag na|huwag na|hindi na|di na|saka na|sa susunod|thank you|thanks|salamat|ty)\b/i;
+// Decides whether a chat needs a follow-up now. Returns { kind, order } or null.
+async function followupCandidate(psid, msgs, hours, now) {
+  if (!isWa(psid) || isPaused(psid) || !msgs.length) return null;
+  const last = msgs[msgs.length - 1];
+  if (!last.fromPage || last.by !== "bot") return null; // waiting on the customer, and the last word was the bot's
+  const lastCust = [...msgs].reverse().find((m) => !m.fromPage);
+  if (!lastCust) return null;
+  const quietMs = now - Date.parse(lastCust.time);
+  if (quietMs < hours * 3600000 || quietMs > 22 * 3600000) return null; // stay inside WhatsApp's 24-hour window
+  if (NOT_INTERESTED.test(lastCust.text || "")) return null;
+  const fu = await getFollowup(psid);
+  if (fu && (Date.parse(fu.sentAt) > Date.parse(lastCust.time) || now - Date.parse(fu.sentAt) < 24 * 3600000)) return null;
+  const order = await getLastOrder(psid);
+  if (order && !order.deliveredAt && Date.parse(order.at) > now - 24 * 3600000) {
+    const proof = msgs.some((m) => !m.fromPage && m.media && Date.parse(m.time) >= Date.parse(order.at));
+    if (proof) return null; // they sent a payment screenshot: the admin delivers
+    return { kind: "order", order };
+  }
+  const botSince = msgs.filter((m) => m.fromPage && Date.parse(m.time) >= Date.parse(lastCust.time)).map((m) => m.text || "").join("\n");
+  if (/₱\s?\d/.test(botSince) || /₱\s?\d/.test(lastCust.text || "")) return { kind: "quote" };
+  return null;
+}
+async function runFollowups() {
+  const st = await followupSettings();
+  if (!st.enabled || !WA_TOKEN) return;
+  const now = Date.now();
+  for (const [psid, msgs] of Array.from(chatLog.entries())) {
+    try {
+      const c = await followupCandidate(psid, msgs, st.hours, now);
+      if (!c) continue;
+      const first = realFirstName(await getCustomerName(psid));
+      let text = c.kind === "order"
+        ? `Hi${first ? " " + first : ""}! 😊 Just checking in on your eSIM order: ${c.order.plan}${c.order.price ? " (" + c.order.price + ")" : ""}.\n\nIf you've already paid, just send the payment screenshot here and we'll send your QR code right away. Want me to resend the payment details, or do you have any questions? I'm here 24/7.`
+        : `Hi${first ? " " + first : ""}! 😊 Just checking in. Did you find the right eSIM for your trip? I can help you order it now or answer any questions. I'm here 24/7.`;
+      const lang = customerLang.get(psid);
+      if (lang && !/^english$/i.test(lang)) { try { text = (await translateTo(text, lang)) || text; } catch (e) { /* send in English */ } }
+      const ok = await waSend(psid, { type: "text", text: { body: text, preview_url: false } });
+      if (!ok) continue;
+      recordChat(psid, true, text, "bot", { followup: true });
+      await setFollowup(psid, { sentAt: new Date().toISOString(), kind: c.kind, plan: c.order ? c.order.plan : null });
+      appendNote(psid, "[SYSTEM: An automatic follow-up was just sent because the customer went quiet. If they reply, continue helping them complete the order.]");
+      console.log(`[followup] sent to ${psid} (${c.kind})`);
+    } catch (e) { console.error("[followup]", psid, e.message); }
+  }
+}
+setInterval(() => runFollowups().catch((e) => console.error("[followup] run failed:", e.message)), 10 * 60000);
+
+app.get("/admin/api/followup-settings", requireAdmin, async (req, res) => res.json(await followupSettings()));
+app.post("/admin/api/followup-settings", requireAdmin, async (req, res) => {
+  const b = req.body || {};
+  const st = { enabled: !!b.enabled, hours: Math.min(20, Math.max(1, Number(b.hours) || FOLLOWUP_HOURS)) };
+  if (!hasDb()) followupMem.set("settings", st); else await redis(["SET", "settings:followup", JSON.stringify(st)]);
+  res.json(st);
+});
+// Pending orders: customers who ordered in the last 7 days and haven't been delivered yet.
+app.get("/admin/api/pending-orders", requireAdmin, async (req, res) => {
+  const now = Date.now();
+  const rows = [];
+  for (const [psid, msgs] of Array.from(chatLog.entries())) {
+    const order = await getLastOrder(psid);
+    if (!order || order.deliveredAt || Date.parse(order.at) < now - 7 * 24 * 3600000) continue;
+    const proof = msgs.some((m) => !m.fromPage && m.media && Date.parse(m.time) >= Date.parse(order.at));
+    const fu = await getFollowup(psid);
+    rows.push({ psid, customerName: await getCustomerName(psid), channel: isWa(psid) ? "WhatsApp" : "Messenger", plan: order.plan, price: order.price, method: order.method, at: order.at, paymentProof: proof, followupAt: fu && Date.parse(fu.sentAt) >= Date.parse(order.at) ? fu.sentAt : null });
+  }
+  rows.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+  res.json({ orders: rows });
+});
+
 // --- Reseller program (approve resellers, upload private costs) ---
 app.get("/admin/api/reseller", requireAdmin, async (req, res) => {
   const psid = String(req.query.psid || "");

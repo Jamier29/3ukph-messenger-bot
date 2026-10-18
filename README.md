@@ -200,3 +200,10 @@ link can download it.
 - Safety: confirm dialog with cost, one delivery at a time per chat, warns if the order was already delivered,
   refuses when several eSIMCard packages share the name and the price doesn't single one out.
 - Check matching without buying: /admin/esimcard-test?key=ADMIN_KEY&find=europe%2020gb%2030
+
+## WhatsApp auto follow-up + pending orders
+- Every 10 min: a WhatsApp customer who got a price (₱ in the bot's reply) or placed an order, then went quiet for
+  FOLLOWUP_HOURS (default 2, editable in the console) gets ONE friendly follow-up. Only within 22 h of their last
+  message (WhatsApp free window), skipped after "no/later/cancel/thanks", while the admin is replying, or once they
+  sent a payment screenshot. Max one per 24 h. Messenger never gets automatic follow-ups (Meta policy).
+- Console card "Unpaid orders & follow-ups": on/off switch, delay, and the list of undelivered orders (7 days).
