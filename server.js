@@ -1471,6 +1471,14 @@ app.get("/admin/esimcard-test", async (req, res) => {
   if (!esims.configured()) return res.type("text/plain").send("ESIMCARD_TOKEN is not set in Render yet.");
   try {
     const ic = esims.cleanIccid(req.query.iccid);
+    if (req.query.get) {
+      // Read-only peek at any eSIMCard GET endpoint (for setup), e.g. &get=packages?page=1
+      const path = String(req.query.get).replace(/^\/+/, "");
+      if (!/^[A-Za-z0-9_\-\/?=&.]+$/.test(path)) return res.status(400).send("Bad path.");
+      const t0 = Date.now();
+      const d = await esims.call(path);
+      return res.type("application/json").send(`// ${Date.now() - t0} ms\n` + JSON.stringify(d, null, 2).slice(0, 6000));
+    }
     if (req.query.find || req.query.pricing) {
       // Load the eSIMCard price list in the background; this page never waits more than 20 s.
       const ready = await Promise.race([esims.packageList().then(() => true), new Promise((r) => setTimeout(() => r(false), 20000))]);
