@@ -354,6 +354,12 @@ async function findPackage(name, hint = {}) {
   const { raw, ...p } = hits[0];
   return { ...p, matches: 1 };
 }
+// Live details of one package (used to double-check right before buying).
+async function packageDetail(id) {
+  const d = await call(`package/detail/${encodeURIComponent(id)}`);
+  const x = (d && d.data) || {};
+  return { id: String(x.id || id), name: String(x.name || "").trim(), price: num(x.price), days: num(x.package_validity) };
+}
 async function accountBalance() {
   for (const path of ["balance", "my-balance", "wallet"]) {
     try {
@@ -403,4 +409,4 @@ async function purchase(packageId) {
 
 function configured() { return !!TOKEN; }
 
-module.exports = { pricingStatus, packageList, findPackage, accountBalance, purchase, simInfo, init, isIccid, cleanIccid, listEsims, addEsim, removeEsim, findCustomerByIccid, usage, details, findEntry, configured, call };
+module.exports = { packageDetail, pricingStatus, packageList, findPackage, accountBalance, purchase, simInfo, init, isIccid, cleanIccid, listEsims, addEsim, removeEsim, findCustomerByIccid, usage, details, findEntry, configured, call };

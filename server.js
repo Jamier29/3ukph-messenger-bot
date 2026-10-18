@@ -1252,6 +1252,12 @@ app.post("/admin/api/deliver", requireAdmin, async (req, res) => {
     if (pkg && pkg.ambiguous) return res.status(400).json({ error: `eSIMCard has ${pkg.matches} packages with this name. Deliver this one manually.` });
     if (!pkg) return res.status(400).json({ error: `eSIMCard has no package named "${plan.name}". Deliver this one manually.` });
     if (String(b.packageId || "") !== pkg.id) return res.status(409).json({ error: "The package changed since you checked. Tap Check again." });
+    // Final check on eSIMCard right before buying: same package name, price not changed much.
+    try {
+      const live = await esims.packageDetail(pkg.id);
+      if (live.name && live.name.toLowerCase() !== plan.name.toLowerCase()) return res.status(409).json({ error: `eSIMCard package is now "${live.name}", not "${plan.name}". Not bought; deliver manually.` });
+      if (live.price && pkg.price && live.price > pkg.price * 1.1) return res.status(409).json({ error: `eSIMCard price went up to $${live.price.toFixed(2)} (was $${pkg.price.toFixed(2)}). Not bought; check before delivering.` });
+    } catch (e) { console.error("[deliver] detail check skipped:", e.message); }
     let sim;
     try { sim = await esims.purchase(pkg.id); }
     catch (e) { await notifyAdmin({ title: "eSIM purchase FAILED", message: `${await getCustomerName(psid)}\n${plan.name}\n${e.message}`, tags: "warning" }); return res.status(502).json({ error: e.message }); }
