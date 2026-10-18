@@ -1198,8 +1198,72 @@ app.post("/admin/api/esims", requireAdmin, async (req, res) => {
 app.get("/admin/api/esim-usage", requireAdmin, async (req, res) => {
   const ic = esims.cleanIccid(req.query.iccid);
   if (!esims.isIccid(ic)) return res.status(400).json({ error: "Enter a valid ICCID." });
-  try { const u = await esims.usage(ic); delete u.raw; res.json(u); } catch (e) { res.status(502).json({ error: e.message }); }
+  try { const u = await esims.usage(ic); delete u.raw; delete u.details; res.json(u); } catch (e) { res.status(502).json({ error: e.message }); }
 });
+// --- Public "Check my data" (website pop-up). Shows only data numbers and
+// dates for one of OUR eSIMs; no names, phones or order details. Rate limited.
+const dcHits = new Map(); // ip -> [timestamps]
+let dcGlobal = [];
+const dcCache = new Map(); // iccid -> { at, body }
+function dcClientIp(req) { return String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "").split(",")[0].trim(); }
+function dcLimited(ip) {
+  const now = Date.now();
+  dcGlobal = dcGlobal.filter((t) => now - t < 3600000);
+  if (dcGlobal.length >= 600) return "busy";
+  const list = (dcHits.get(ip) || []).filter((t) => now - t < 86400000);
+  const last10 = list.filter((t) => now - t < 600000).length;
+  if (last10 >= 20 || list.length >= 100) { dcHits.set(ip, list); return "you"; }
+  list.push(now); dcHits.set(ip, list); dcGlobal.push(now);
+  if (dcHits.size > 5000) for (const [k, v] of dcHits) if (!v.length || now - v[v.length - 1] > 86400000) dcHits.delete(k);
+  return null;
+}
+function validityFromPlan(plan) { const m = String(plan || "").match(/(\d{1,3})\s*-?\s*days?/i); return m ? Number(m[1]) : null; }
+app.get("/api/data-check", async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  const ic = esims.cleanIccid(req.query.iccid);
+  if (!esims.isIccid(ic)) return res.status(400).json({ error: "bad_iccid", message: "That doesn't look like an ICCID. It starts with 89 and has 19 or 20 digits." });
+  const cached = dcCache.get(ic);
+  if (cached && Date.now() - cached.at < 60000 && !req.query.refresh) return res.json(cached.body);
+  const lim = dcLimited(dcClientIp(req));
+  if (lim) return res.status(429).json({ error: "rate_limited", message: lim === "busy" ? "Lots of people are checking right now. Please try again in a few minutes." : "Too many checks from this device. Please wait about 10 minutes and try again." });
+  if (!esims.configured()) return res.status(503).json({ error: "unavailable", message: "Data checking is temporarily unavailable. Message us on WhatsApp and we'll check for you." });
+  let u;
+  try { u = await esims.usage(ic); }
+  catch (e) {
+    const notFound = /wasn't found|not found|404|422|invalid/i.test(e.message);
+    if (!notFound) console.error("[data-check] failed:", e.message);
+    return res.status(notFound ? 404 : 502).json(notFound
+      ? { error: "not_found", message: "We couldn't find a 3UKPH eSIM with that ICCID. Please check the number, or message us on WhatsApp." }
+      : { error: "unavailable", message: "We couldn't reach the network just now. Please try again in a minute." });
+  }
+  let plan = u.bundle || null, deliveredAt = null;
+  try {
+    const owner = await esims.findCustomerByIccid(ic);
+    if (owner) { const rec = (await esims.listEsims(owner)).find((e) => e.iccid === ic); if (rec) { plan = rec.plan || plan; deliveredAt = rec.addedAt || null; } }
+  } catch (e) { /* records are optional */ }
+  const st = String(u.statusText || "").toLowerCase();
+  const expMs = u.expires ? Date.parse(u.expires) : NaN;
+  const remainingZero = u.remaining && /^0(\.0+)?\s*(GB|MB)$/i.test(u.remaining) && !u.unlimited;
+  let state = "active";
+  if ((Number.isFinite(expMs) && expMs < Date.now()) || /expir/.test(st)) state = "expired";
+  else if (remainingZero || /deplet|exhaust|used.?up|finish/.test(st)) state = "used_up";
+  else if (/not.?activ|inactive|pending|new|unused|ready|released|not.?install/.test(st) || (u.percentUsed === 0 && !u.activated && /^(|null)$/.test(st))) state = "not_active";
+  const body = {
+    ok: true, iccidEnding: ic.slice(-4), plan,
+    total: u.total, used: u.used, remaining: u.remaining, percentUsed: u.percentUsed, unlimited: !!u.unlimited,
+    state, expires: Number.isFinite(expMs) ? new Date(expMs).toISOString() : null, expiresEstimated: !!u.expiresEstimated,
+    activated: u.activated || null, validityDays: u.validityDays || validityFromPlan(plan), deliveredAt,
+    checkedAt: new Date().toISOString()
+  };
+  dcCache.set(ic, { at: Date.now(), body });
+  if (dcCache.size > 2000) dcCache.clear();
+  res.json(body);
+});
+app.get(["/data", "/check-data", "/usage"], (req, res) => {
+  const ic = esims.cleanIccid(req.query.iccid);
+  res.redirect(302, "/" + (esims.isIccid(ic) ? `?iccid=${ic}` : "") + "#check-data");
+});
+
 app.get("/admin/api/esim-find", requireAdmin, async (req, res) => {
   const ic = esims.cleanIccid(req.query.iccid);
   try {

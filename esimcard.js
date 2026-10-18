@@ -122,6 +122,73 @@ function summarize(raw) {
   };
 }
 
+// ---- Expiry / status: the response shape varies by account, so search it --
+function walk(obj, fn, depth = 0) {
+  if (!obj || typeof obj !== "object" || depth > 6) return;
+  for (const [k, v] of Object.entries(obj)) {
+    if (v && typeof v === "object") walk(v, fn, depth + 1);
+    else fn(k, v);
+  }
+}
+function parseDate(v) {
+  if (v === null || v === undefined || v === "" || typeof v === "boolean") return null;
+  if (typeof v === "number" || /^\d{10,13}$/.test(String(v))) {
+    const n = Number(v); const d = new Date(n < 1e12 ? n * 1000 : n);
+    return d.getFullYear() > 2015 && d.getFullYear() < 2100 ? d : null;
+  }
+  const s = String(v).trim();
+  if (!/\d{4}-\d{2}-\d{2}|\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/.test(s)) return null;
+  const d = new Date(/^\d{4}-\d{2}-\d{2} \d/.test(s) ? s.replace(" ", "T") + (/[zZ+]/.test(s.slice(10)) ? "" : "Z") : s);
+  return isNaN(d) || d.getFullYear() < 2015 || d.getFullYear() > 2100 ? null : d;
+}
+function findDate(obj, re) {
+  let hit = null;
+  walk(obj, (k, v) => { if (!hit && re.test(k)) { const d = parseDate(v); if (d) hit = d; } });
+  return hit;
+}
+function findNum(obj, re) {
+  let hit = null;
+  walk(obj, (k, v) => { if (hit === null && re.test(k)) { const n = num(v); if (n !== null && n > 0 && n <= 3650) hit = n; } });
+  return hit;
+}
+function findStr(obj, re) {
+  let hit = null;
+  walk(obj, (k, v) => { if (!hit && re.test(k) && typeof v === "string" && v.length < 60) hit = v; });
+  return hit;
+}
+const EXPIRY_KEYS = /(expir|valid_?until|valid_?to|valid_?till|end_?(date|time|at|on)$|^ends?_at$)/i;
+const START_KEYS = /(activat|first_?use|start_?(date|time|at|on)|installed_?at)/i;
+const VALIDITY_KEYS = /(validity|duration|_days$|^days$|valid_?days|period)/i;
+
+function lifecycle(...raws) {
+  let expires = null, activated = null, validityDays = null, status = null, name = null;
+  for (const r of raws) {
+    if (!r) continue;
+    expires = expires || findDate(r, EXPIRY_KEYS);
+    activated = activated || findDate(r, START_KEYS);
+    validityDays = validityDays || findNum(r, VALIDITY_KEYS);
+    status = status || findStr(r, /status|state/i);
+    name = name || findStr(r, /^(bundle_?name|package_?name|plan_?name|bundle|package|plan)$/i);
+  }
+  let estimated = false;
+  if (!expires && activated && validityDays) { expires = new Date(activated.getTime() + validityDays * 86400000); estimated = true; }
+  return { expires: expires ? expires.toISOString() : null, expiresEstimated: estimated || undefined, activated: activated ? activated.toISOString() : null, validityDays, statusText: status, name };
+}
+
+// SIM details (packages, dates). Best effort; cached because dates rarely change.
+const detailCache = new Map();
+async function details(iccid) {
+  iccid = cleanIccid(iccid);
+  const c = detailCache.get(iccid);
+  if (c && Date.now() - c.at < 30 * 60000) return c.data;
+  let data = null;
+  for (const path of [`my-sim/${iccid}`, `my-sim/${iccid}/packages`]) {
+    try { data = { ...(data || {}), [path.endsWith("packages") ? "packages" : "sim"]: await call(path) }; } catch (e) { /* not available on this account */ }
+  }
+  detailCache.set(iccid, { at: Date.now(), data });
+  return data;
+}
+
 async function usage(iccid) {
   iccid = cleanIccid(iccid);
   let raw;
@@ -132,9 +199,13 @@ async function usage(iccid) {
     if (!id) throw new Error("This ICCID wasn't found in the eSIMCard account.");
     raw = await call(`my-sim/${id}/usage`);
   }
-  return { iccid, ...summarize(raw), raw };
+  const sum = summarize(raw);
+  let det = null;
+  try { det = await details(iccid); } catch { det = null; }
+  const life = lifecycle(raw, det);
+  return { iccid, ...sum, bundle: sum.bundle || life.name || undefined, expires: life.expires || sum.expires || null, expiresEstimated: life.expiresEstimated, activated: life.activated, validityDays: life.validityDays, statusText: sum.status || life.statusText || null, raw, details: det };
 }
 
 function configured() { return !!TOKEN; }
 
-module.exports = { init, isIccid, cleanIccid, listEsims, addEsim, removeEsim, findCustomerByIccid, usage, configured, call };
+module.exports = { init, isIccid, cleanIccid, listEsims, addEsim, removeEsim, findCustomerByIccid, usage, details, configured, call };

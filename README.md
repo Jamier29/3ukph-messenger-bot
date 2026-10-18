@@ -184,3 +184,11 @@ wrong, the last good prices stay; check `https://3ukph.com/api/price-status`.
 
 Never put your supplier cost in the published sheet: anyone with the
 link can download it.
+
+## Check my data (website pop-up)
+- 3ukph.com/data (or the "My data" button / #check-data) opens a pop-up where customers enter their ICCID
+  and see data left, used, and expiry, live from eSIMCard (`GET /api/data-check?iccid=`).
+- Only data numbers and dates are shown. Limited to 20 checks per 10 minutes per connection.
+- Link straight to one eSIM: 3ukph.com/data?iccid=89...
+- Expiry comes from eSIMCard when it provides it; otherwise it is estimated from activation date + plan days,
+  or the pop-up shows the plan's validity.

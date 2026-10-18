@@ -453,7 +453,10 @@ footer a{color:#fff}
       <li class="nav-tv"><a class="uk-btn uk-btn-ghost" href="#trivia">Trivia</a></li>
       <li><a class="uk-btn uk-btn-ghost" href="#faq">FAQ</a></li>
     </ul></nav>
-    <a class="uk-btn uk-btn-accent" href="https://www.messenger.com/t/103294518884622">Order now</a>
+    <div class="bar-actions">
+      <button type="button" class="dc-hbtn" data-dc aria-label="Check my data"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M4 20V14M9.33 20V10M14.66 20V6M20 20V3"/></svg><span>My data</span></button>
+      <a class="uk-btn uk-btn-accent" href="https://www.messenger.com/t/103294518884622">Order now</a>
+    </div>
   </div>
 </header>
 
@@ -484,6 +487,7 @@ footer a{color:#fff}
         <li>GCash, Maya, banks &amp; PayPal</li>
         <li>~5-min delivery</li>
         <li>Open 24/7</li>
+        <li><a href="#check-data" style="color:inherit;font-weight:700">Check my data</a></li>
       </ul>
       <a class="bir-hero" href="https://verify.bir.gov.ph/correspondence/0605ebb12d524393bf385d43c45ee6df" target="_blank" rel="noopener" title="Verify our BIR registration on bir.gov.ph">
         <img src="/bir-seal-badge.png" alt="BIR Registration Seal Badge of 3UKPH ESIM INTL E-LOAD AND SIMCARDS TRADING" width="197" height="64">
@@ -846,6 +850,7 @@ footer a{color:#fff}
       <details><summary>How do I install it?</summary><p>iPhone: Settings › Cellular › Add eSIM. Android: Settings › Connections › SIM manager. Install on Wi-Fi before you travel — QR codes usually work only once.</p></details>
       <details><summary>Can I keep my Philippine SIM?</summary><p>Yes. The travel eSIM is added as a second line, so your Philippine SIM can stay.</p></details>
       <details><summary>How do I pay?</summary><p>In the Philippines: GCash, Maya, MariBank, or bank transfer to UnionBank or BPI. From abroad: PayPal or credit/debit card in USD. Message us first and we'll quote the exact amount.</p></details>
+      <details><summary>How do I check how much data I have left?</summary><p>Tap <a href="#check-data">Check my data</a> and enter your eSIM's ICCID (the number starting with 89 that we send with your QR code). You'll see data left, data used and when your plan expires. You can also ask our WhatsApp assistant anytime.</p></details>
       <details><summary>What if I run out of data?</summary><p>Just message us — even mid-contract — and we'll set you up with another plan right away.</p></details>
     </div>
   </div>
@@ -1373,6 +1378,285 @@ renderFinder();
   draggable(card,copy);
   draggable(mini,function(){setMin(false);});
   x.addEventListener('click',function(e){e.stopPropagation();setMin(true);});
+})();
+</script>
+<!-- Check my data: pop-up that shows live data left, usage and expiry for an ICCID -->
+<style>
+.dc-hbtn{display:inline-flex;align-items:center;gap:6px;background:transparent;border:2px solid var(--hairline);color:var(--ink);border-radius:var(--radius-md);padding:8px 12px;font:700 14px/20px var(--font-sans);cursor:pointer;white-space:nowrap}
+.dc-hbtn:hover{border-color:var(--brand-blue)}
+.dc-hbtn svg{width:18px;height:18px;flex:none;color:var(--brand-blue)}
+.bar-actions{display:flex;align-items:center;gap:8px}
+@media(max-width:420px){.dc-hbtn span{display:none}.dc-hbtn{padding:9px}}
+@media(min-width:960px) and (max-width:1359px){.dc-hbtn span{display:none}.dc-hbtn{padding:9px}}
+nav a.uk-btn-ghost{white-space:nowrap}
+@media(max-width:1439px){.nav-tv{display:none}}
+@media(min-width:960px) and (max-width:1199px){nav a.uk-btn-ghost{font-size:14px;padding:8px 7px}.bar .uk-btn-accent{padding:10px 16px;font-size:15px}.brand{font-size:16px}}
+@media(min-width:960px) and (max-width:1099px){nav a.uk-btn-ghost{font-size:13.5px;padding:6px 5px}.bar{gap:10px}}
+.dc-back{position:fixed;inset:0;z-index:95;background:rgba(0,10,40,.6);display:flex;align-items:flex-end;justify-content:center;padding:12px;opacity:0;pointer-events:none;transition:opacity .2s}
+.dc-back.open{opacity:1;pointer-events:auto}
+@media(min-width:640px){.dc-back{align-items:center;padding:24px}}
+.dc{position:relative;width:100%;max-width:440px;max-height:calc(100vh - 24px);overflow:auto;background:var(--surface);color:var(--ink);border-radius:var(--radius-lg);box-shadow:0 24px 70px rgba(0,0,0,.4);font-family:var(--font-sans);transform:translateY(24px);transition:transform .22s}
+.dc-back.open .dc{transform:none}
+.dc-head{display:flex;align-items:center;gap:12px;padding:18px 18px 14px;background:linear-gradient(135deg,#00166a,#012ca5);color:#fff;border-radius:var(--radius-lg) var(--radius-lg) 0 0}
+.dc-head svg{width:30px;height:30px;flex:none;color:#f8c830}
+.dc-head h3{margin:0;font-size:19px;line-height:1.2;color:#fff}
+.dc-head p{margin:2px 0 0;font-size:13px;color:#d6dcf5}
+.dc-x{margin-left:auto;background:rgba(255,255,255,.14);border:0;color:#fff;width:36px;height:36px;border-radius:50%;font:700 20px/1 var(--font-sans);cursor:pointer;flex:none}
+.dc-x:hover{background:rgba(255,255,255,.26)}
+.dc-body{padding:18px}
+.dc-view{display:none}.dc-view.on{display:block}
+.dc label.dc-l{display:block;font-weight:700;font-size:14px;margin-bottom:6px}
+.dc-in{width:100%;font:700 20px/1.2 var(--font-sans);letter-spacing:1px;padding:14px;border:2px solid var(--border);border-radius:var(--radius-md);background:var(--surface);color:var(--ink);outline:none}
+.dc-in:focus{border-color:var(--brand-blue);box-shadow:0 0 0 3px rgba(1,44,165,.18)}
+.dc-in.bad{border-color:var(--brand-red)}
+.dc-hint{display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--ink-muted);margin:6px 2px 14px}
+.dc-hint b.ok{color:var(--success)}
+.dc-btn{display:flex;width:100%;align-items:center;justify-content:center;gap:8px;border:0;border-radius:var(--radius-md);padding:14px;font:700 16px var(--font-sans);cursor:pointer;text-decoration:none;background:#cf0507;color:#fff}
+.dc-btn:disabled{opacity:.55;cursor:not-allowed}
+.dc-btn.alt{background:var(--surface-raised);color:var(--ink);border:2px solid var(--hairline)}
+.dc-btn.wa{background:#25d366;color:#05351a}
+.dc-row{display:flex;gap:10px;margin-top:10px}.dc-row>*{flex:1}
+.dc-rem{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-muted);margin:12px 2px 0;cursor:pointer}
+.dc-saved{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 14px}
+.dc-chip{border:2px solid var(--hairline);background:var(--surface-raised);color:var(--ink);border-radius:var(--radius-pill);padding:6px 12px;font:700 13px var(--font-sans);cursor:pointer}
+.dc-chip:hover{border-color:var(--brand-blue)}
+.dc details{margin-top:16px;border:1px solid var(--hairline);border-radius:var(--radius-md);padding:10px 14px;background:var(--surface-raised)}
+.dc summary{cursor:pointer;font-weight:700;font-size:14px;color:var(--brand-blue)}
+.dc details ul{margin:10px 0 2px;padding-left:18px;font-size:13px;line-height:1.55;color:var(--ink-muted)}
+.dc details li b{color:var(--ink)}
+.dc-load{text-align:center;padding:34px 0 26px;color:var(--ink-muted);font-size:14px}
+.dc-spin{width:46px;height:46px;margin:0 auto 14px;border-radius:50%;border:5px solid var(--hairline);border-top-color:var(--brand-blue);animation:dcspin .8s linear infinite}
+@keyframes dcspin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.dc-spin{animation-duration:2.4s}}
+.dc-top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px}
+.dc-plan{font-weight:800;font-size:16px;line-height:1.3}
+.dc-ic{font-size:12px;color:var(--ink-muted);margin-top:2px}
+.dc-st{flex:none;font-weight:800;font-size:12px;padding:4px 10px;border-radius:var(--radius-pill);white-space:nowrap}
+.dc-st.active{background:#dff5e8;color:#0e5a30}.dc-st.not_active{background:#e6ecff;color:#012ca5}
+.dc-st.used_up,.dc-st.expired{background:#fde3e3;color:#a00405}
+.dc-gauge{position:relative;width:200px;height:200px;margin:10px auto 6px}
+.dc-gauge svg{width:100%;height:100%;transform:rotate(-90deg)}
+.dc-gauge .trk{stroke:var(--hairline)}
+.dc-gauge .val{transition:stroke-dashoffset .9s cubic-bezier(.2,.8,.2,1),stroke .3s}
+.dc-gc{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
+.dc-gc b{font-size:32px;line-height:1.1;font-weight:800}
+.dc-gc span{font-size:13px;color:var(--ink-muted);margin-top:4px}
+.dc-stats{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:14px 0 4px}
+.dc-stat{background:var(--surface-raised);border-radius:var(--radius-md);padding:12px}
+.dc-stat small{display:block;font-size:12px;font-weight:700;color:var(--ink-muted);text-transform:uppercase;letter-spacing:.5px}
+.dc-stat b{display:block;font-size:17px;margin-top:4px;line-height:1.25}
+.dc-stat em{display:block;font-style:normal;font-size:12px;color:var(--ink-muted);margin-top:2px}
+.dc-bar{height:8px;border-radius:99px;background:var(--hairline);overflow:hidden;margin-top:8px}
+.dc-bar i{display:block;height:100%;width:0;background:var(--brand-blue);transition:width .9s cubic-bezier(.2,.8,.2,1)}
+.dc-warn{display:none;margin:12px 0 4px;padding:10px 12px;border-radius:var(--radius-md);font-size:13px;line-height:1.45;background:#fff5d6;color:#6b4a00;border:1px solid #f1d27a}
+.dc-warn.on{display:block}
+.dc-foot{font-size:11.5px;color:var(--ink-muted);text-align:center;margin-top:12px;line-height:1.5}
+.dc-err{text-align:center;padding:12px 0 4px}
+.dc-err .ico{width:52px;height:52px;margin:0 auto 10px;border-radius:50%;display:grid;place-items:center;background:#fde3e3;color:#a00405;font:800 26px var(--font-sans)}
+.dc-err p{color:var(--ink-muted);font-size:14px;line-height:1.5;margin:0 0 14px}
+@media (prefers-color-scheme: dark){
+  .dc-st.active{background:#123b25;color:#7be3a6}.dc-st.not_active{background:#1b2657;color:#a9bcff}
+  .dc-st.used_up,.dc-st.expired{background:#4a1416;color:#ff9a9b}
+  .dc-warn{background:#3b2e0a;color:#f5d27a;border-color:#6b5414}
+  .dc-err .ico{background:#4a1416;color:#ff9a9b}
+}
+</style>
+<div class="dc-back" id="dcBack" aria-hidden="true">
+  <div class="dc" role="dialog" aria-modal="true" aria-labelledby="dcTitle">
+    <div class="dc-head">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V14M9.33 20V10M14.66 20V6M20 20V3"/></svg>
+      <div><h3 id="dcTitle">Check your data</h3><p>Live data left, usage and expiry</p></div>
+      <button type="button" class="dc-x" id="dcX" aria-label="Close">×</button>
+    </div>
+    <div class="dc-body">
+      <!-- form -->
+      <div class="dc-view on" id="dcForm">
+        <div class="dc-saved" id="dcSaved" hidden></div>
+        <form id="dcF" novalidate>
+          <label class="dc-l" for="dcIn">Your eSIM ICCID</label>
+          <input class="dc-in" id="dcIn" inputmode="numeric" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="89…" maxlength="30" aria-describedby="dcHint">
+          <div class="dc-hint" id="dcHint"><span>Starts with 89, 19–20 digits</span><b id="dcCount">0 digits</b></div>
+          <button class="dc-btn" id="dcGo" type="submit" disabled>Check my data</button>
+          <label class="dc-rem"><input type="checkbox" id="dcRem" checked> Remember this eSIM on this device</label>
+        </form>
+        <details>
+          <summary>Where do I find my ICCID?</summary>
+          <ul>
+            <li><b>In our message:</b> we send the ICCID with your eSIM QR code on WhatsApp, Messenger or email.</li>
+            <li><b>iPhone:</b> Settings › General › About, scroll down and tap your travel eSIM line to see the ICCID.</li>
+            <li><b>Samsung / Android:</b> Settings › About phone › Status information › SIM card status (choose the eSIM).</li>
+            <li>Still can't find it? <a href="https://api.whatsapp.com/send?phone=639347069356&text=Hi%203UK%20Philippines!%20Please%20help%20me%20check%20my%20eSIM%20data." target="_blank" rel="noopener" data-direct>Message us on WhatsApp</a> and we'll check for you.</li>
+          </ul>
+        </details>
+      </div>
+      <!-- loading -->
+      <div class="dc-view" id="dcLoad"><div class="dc-load"><div class="dc-spin"></div>Checking with the network…</div></div>
+      <!-- result -->
+      <div class="dc-view" id="dcRes">
+        <div class="dc-top">
+          <div><div class="dc-plan" id="dcPlan">Your eSIM</div><div class="dc-ic" id="dcIc"></div></div>
+          <span class="dc-st" id="dcSt">Active</span>
+        </div>
+        <div class="dc-gauge" aria-hidden="true">
+          <svg viewBox="0 0 120 120"><circle class="trk" cx="60" cy="60" r="52" fill="none" stroke-width="12"/><circle class="val" id="dcArc" cx="60" cy="60" r="52" fill="none" stroke-width="12" stroke-linecap="round" stroke="#012ca5" stroke-dasharray="326.73" stroke-dashoffset="326.73"/></svg>
+          <div class="dc-gc"><b id="dcLeft">–</b><span id="dcLeftSub">left</span></div>
+        </div>
+        <p class="sr-only" id="dcSr" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)" aria-live="polite"></p>
+        <div class="dc-stats">
+          <div class="dc-stat"><small>Used</small><b id="dcUsed">–</b><em id="dcUsedSub"></em><div class="dc-bar"><i id="dcBar"></i></div></div>
+          <div class="dc-stat"><small id="dcExpL">Expires</small><b id="dcExp">–</b><em id="dcExpSub"></em></div>
+        </div>
+        <div class="dc-warn" id="dcWarn"></div>
+        <div class="dc-row">
+          <a class="dc-btn wa" id="dcReload" target="_blank" rel="noopener" data-direct href="#">Buy a reload</a>
+        </div>
+        <div class="dc-row">
+          <button type="button" class="dc-btn alt" id="dcRefresh">Refresh</button>
+          <button type="button" class="dc-btn alt" id="dcAnother">Check another</button>
+        </div>
+        <div class="dc-foot" id="dcFoot"></div>
+      </div>
+      <!-- error -->
+      <div class="dc-view" id="dcErr">
+        <div class="dc-err">
+          <div class="ico">!</div>
+          <p id="dcErrMsg">Something went wrong.</p>
+          <button type="button" class="dc-btn" id="dcRetry">Try again</button>
+          <div class="dc-row"><a class="dc-btn wa" id="dcHelp" target="_blank" rel="noopener" data-direct href="https://api.whatsapp.com/send?phone=639347069356">Ask us on WhatsApp</a></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+  var WA='https://api.whatsapp.com/send?phone=639347069356&text=';
+  var $=function(id){return document.getElementById(id);};
+  var back=$('dcBack'), inp=$('dcIn'), go=$('dcGo'), count=$('dcCount'), rem=$('dcRem');
+  var views=['dcForm','dcLoad','dcRes','dcErr'], current='', lastFocus=null, busy=false;
+  var CIRC=326.73, KEY='3ukph_iccids';
+  function store(){try{var v=JSON.parse(localStorage.getItem(KEY)||'[]');return Array.isArray(v)?v.filter(function(x){return /^89\d{16,20}$/.test(x);}).slice(0,3):[];}catch(e){return [];}}
+  function save(ic){try{var l=store().filter(function(x){return x!==ic;});l.unshift(ic);localStorage.setItem(KEY,JSON.stringify(l.slice(0,3)));}catch(e){}}
+  function forget(ic){try{localStorage.setItem(KEY,JSON.stringify(store().filter(function(x){return x!==ic;})));}catch(e){}}
+  function clean(v){return String(v||'').replace(/\D/g,'');}
+  function valid(v){return /^89\d{17,18}$/.test(v)||/^89\d{16,20}$/.test(v);}
+  function show(v){views.forEach(function(x){$(x).classList.toggle('on',x===v);});}
+  function renderSaved(){
+    var box=$('dcSaved'), l=store(); box.innerHTML='';
+    if(!l.length){box.hidden=true;return;}
+    box.hidden=false;
+    l.forEach(function(ic){var b=document.createElement('button');b.type='button';b.className='dc-chip';b.textContent='eSIM •••• '+ic.slice(-4);b.title='Check '+ic;b.onclick=function(){inp.value=ic;onInput();check(ic);};box.appendChild(b);});
+  }
+  function onInput(){
+    var v=clean(inp.value), n=v.length;
+    count.textContent=n+(n===1?' digit':' digits');
+    var ok=valid(v); count.className=ok?'ok':''; go.disabled=!ok;
+    inp.classList.toggle('bad', n>=4 && v.slice(0,2)!=='89');
+  }
+  inp.addEventListener('input',onInput);
+  inp.addEventListener('paste',function(){setTimeout(function(){inp.value=clean(inp.value);onInput();},0);});
+  function open(prefill,auto){
+    lastFocus=document.activeElement; renderSaved();
+    if(prefill){inp.value=prefill;} else if(!inp.value){var l=store(); if(l.length)inp.value=l[0];}
+    onInput(); show('dcForm');
+    back.classList.add('open'); back.setAttribute('aria-hidden','false'); document.documentElement.style.overflow='hidden';
+    setTimeout(function(){ if(auto&&valid(clean(inp.value))) check(clean(inp.value)); else inp.focus(); },60);
+  }
+  function close(){
+    back.classList.remove('open'); back.setAttribute('aria-hidden','true'); document.documentElement.style.overflow='';
+    if(location.hash==='#check-data'){try{history.replaceState(null,'',location.pathname+location.search.replace(/([?&])iccid=\d+&?/,'$1').replace(/[?&]$/,''));}catch(e){}}
+    if(lastFocus&&lastFocus.focus)lastFocus.focus();
+  }
+  function fmtDate(d){try{return d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});}catch(e){return d.toDateString();}}
+  function fmtTime(d){try{return d.toLocaleTimeString([], {hour:'numeric',minute:'2-digit'});}catch(e){return '';}}
+  function gb(s){if(!s)return null;var m=String(s).match(/([\d.]+)\s*(GB|MB)/i);if(!m)return null;var n=parseFloat(m[1]);return /MB/i.test(m[2])?n/1024:n;}
+  var errKind='';
+  function err(msg, ic, kind){
+    errKind=kind||''; $('dcRetry').textContent=(errKind==='not_found'||errKind==='bad_iccid')?'Edit the number':'Try again';
+    $('dcErrMsg').textContent=msg;
+    $('dcHelp').href=WA+encodeURIComponent('Hi 3UK Philippines! Please help me check my eSIM data.'+(ic?' ICCID: '+ic:''));
+    show('dcErr'); $('dcRetry').focus();
+  }
+  function check(ic, refresh){
+    if(busy)return; ic=clean(ic||inp.value);
+    if(!valid(ic)){show('dcForm');inp.focus();return;}
+    busy=true; current=ic; show('dcLoad');
+    var ctl=('AbortController' in window)?new AbortController():null, t=setTimeout(function(){if(ctl)ctl.abort();},30000);
+    fetch('/api/data-check?iccid='+ic+(refresh?'&refresh=1':''),{signal:ctl?ctl.signal:undefined,headers:{'Accept':'application/json'}})
+      .then(function(r){return r.json().catch(function(){return {error:'unavailable',message:'We couldn\'t reach the network just now. Please try again in a minute.'};}).then(function(j){j._status=r.status;return j;});})
+      .then(function(j){
+        if(!j.ok){ if(j.error==='not_found')forget(ic); err(j.message||'Something went wrong. Please try again.', ic, j.error); return; }
+        if(rem.checked)save(ic); else forget(ic);
+        render(j);
+      })
+      .catch(function(){err('We couldn\'t connect. Please check your internet and try again.', ic);})
+      .then(function(){clearTimeout(t);busy=false;});
+  }
+  function render(j){
+    var now=Date.now();
+    $('dcPlan').textContent=j.plan||'Your 3UKPH eSIM';
+    $('dcIc').textContent='ICCID •••• '+j.iccidEnding;
+    var labels={active:'Active',not_active:'Not used yet',used_up:'Data used up',expired:'Expired'};
+    var st=$('dcSt'); st.className='dc-st '+(j.state||'active'); st.textContent=labels[j.state]||'Active';
+    var tot=gb(j.total), left=gb(j.remaining), used=gb(j.used);
+    if(left===null&&tot!==null&&used!==null)left=Math.max(0,tot-used);
+    var frac = j.unlimited ? 1 : (tot ? Math.max(0,Math.min(1,(left||0)/tot)) : 0);
+    if(j.state==='expired')frac=0;
+    var color = j.state==='expired'||frac<=0.1 ? '#cf0507' : frac<=0.25 ? '#c48205' : '#012ca5';
+    var arc=$('dcArc'); arc.setAttribute('stroke',color); arc.style.strokeDashoffset=CIRC;
+    requestAnimationFrame(function(){requestAnimationFrame(function(){arc.style.strokeDashoffset=String(CIRC*(1-frac));});});
+    $('dcLeft').textContent = j.unlimited ? 'Unlimited' : (j.state==='expired' ? '0 GB' : (j.remaining||'–'));
+    $('dcLeftSub').textContent = j.unlimited ? 'data plan' : (j.total ? 'left of '+j.total : 'left');
+    $('dcUsed').textContent = j.used || (j.unlimited?'–':'0 GB');
+    $('dcUsedSub').textContent = (j.percentUsed!==null&&j.percentUsed!==undefined&&!j.unlimited) ? j.percentUsed+'% of your plan' : '';
+    var bar=$('dcBar'); bar.style.width='0'; bar.style.background=color;
+    setTimeout(function(){bar.style.width=(j.unlimited?0:Math.min(100,j.percentUsed||0))+'%';},50);
+    // Expiry
+    var expL=$('dcExpL'), exp=$('dcExp'), expSub=$('dcExpSub'), days=null;
+    if(j.expires){
+      var d=new Date(j.expires); days=Math.ceil((d.getTime()-now)/86400000);
+      expL.textContent = days<0 ? 'Expired on' : 'Expires';
+      exp.textContent=(j.expiresEstimated?'~ ':'')+fmtDate(d);
+      expSub.textContent = days<0 ? 'Plan has ended' : days===0 ? 'Today, '+fmtTime(d) : days===1 ? '1 day left' : days+' days left';
+    } else if(j.state==='not_active'){
+      expL.textContent='Validity'; exp.textContent=j.validityDays?j.validityDays+' days':'Not started';
+      expSub.textContent='Starts when it first connects abroad';
+    } else {
+      expL.textContent='Validity'; exp.textContent=j.validityDays?j.validityDays+'-day plan':'—';
+      expSub.textContent='Counted from first connection';
+    }
+    // Warnings
+    var w=$('dcWarn'), msg='';
+    if(j.state==='expired') msg='This plan has expired. Get a reload to stay connected.';
+    else if(j.state==='used_up') msg='You\'ve used all your data. Get a reload and keep the same eSIM where possible.';
+    else if(!j.unlimited && tot && frac<=0.15) msg='Running low: only '+(j.remaining||'a little')+' left. Reload now so you don\'t get cut off in port.';
+    else if(days!==null && days>=0 && days<=3) msg='Your plan ends in '+(days===0?'less than a day':days+(days===1?' day':' days'))+'. Reload before it expires.';
+    else if(j.state==='not_active') msg='Your eSIM hasn\'t used data yet. Turn on the eSIM line and data roaming when you arrive.';
+    w.textContent=msg; w.classList.toggle('on',!!msg);
+    $('dcReload').href=WA+encodeURIComponent('Hi 3UK Philippines! I\'d like to reload my eSIM (ICCID ending '+j.iccidEnding+').'+(j.plan?' Current plan: '+j.plan+'.':''));
+    $('dcReload').textContent = (j.state==='expired'||j.state==='used_up'||msg&&j.state==='active') ? 'Reload now on WhatsApp' : 'Buy a reload';
+    $('dcFoot').textContent='Checked at '+fmtTime(new Date(j.checkedAt||now))+'. Usage from the network can take a little time to update.';
+    $('dcSr').textContent=(j.unlimited?'Unlimited data. ':(j.remaining||'')+' left of '+(j.total||'your plan')+'. ')+(j.expires?'Expires '+fmtDate(new Date(j.expires))+'.':'');
+    show('dcRes'); $('dcReload').focus({preventScroll:true});
+  }
+  $('dcF').addEventListener('submit',function(e){e.preventDefault();check();});
+  $('dcRefresh').addEventListener('click',function(){check(current,true);});
+  $('dcAnother').addEventListener('click',function(){inp.value='';onInput();renderSaved();show('dcForm');inp.focus();});
+  $('dcRetry').addEventListener('click',function(){ if(current&&errKind!=='not_found'&&errKind!=='bad_iccid') check(current); else {show('dcForm');inp.focus();inp.select();} });
+  $('dcX').addEventListener('click',close);
+  back.addEventListener('click',function(e){if(e.target===back)close();});
+  document.addEventListener('keydown',function(e){
+    if(!back.classList.contains('open'))return;
+    if(e.key==='Escape'){close();return;}
+    if(e.key==='Tab'){var f=[].slice.call(back.querySelectorAll('button,a[href],input,summary')).filter(function(el){return el.offsetParent!==null&&!el.disabled;}); if(!f.length)return; var a=f[0],z=f[f.length-1]; if(e.shiftKey&&document.activeElement===a){e.preventDefault();z.focus();} else if(!e.shiftKey&&document.activeElement===z){e.preventDefault();a.focus();}}
+  });
+  document.addEventListener('click',function(e){
+    var t=e.target.closest&&e.target.closest('[data-dc],a[href="#check-data"],a[href="/data"]');
+    if(!t||t.closest('#dcBack'))return; e.preventDefault(); open('',false);
+  });
+  window.addEventListener('hashchange',function(){if(location.hash==='#check-data'&&!back.classList.contains('open'))open('',false);});
+  var q=(location.search.match(/[?&]iccid=(\d{18,22})/)||[])[1];
+  if(location.hash==='#check-data'||q) open(q||'', !!q);
 })();
 </script>
 <!-- Chat chooser: every "chat / order" link asks WhatsApp or Messenger -->
