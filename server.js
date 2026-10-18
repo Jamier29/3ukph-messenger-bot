@@ -915,6 +915,7 @@ async function callClaudeText(system, user, maxTokens) {
 async function translateForConsole(text) {
   const t = String(text || "").trim();
   if (t.length < 2 || !ANTHROPIC_API_KEY) return null;
+  if (!/\p{L}{2,}/u.test(t)) return null; // numbers, ICCIDs, emojis: no language to detect
   // Plain ASCII text with common English/Taglish words: skip the API call.
   if (/^[\x00-\x7F₱]*$/.test(t) && /\b(the|and|you|your|is|are|i|my|for|to|of|please|thanks|hi|hello|eSIM|po|ako|ko|ng|sa|mo|yung|na|lang|pa|salamat)\b/i.test(t)) return null;
   if (translateCache.has(t)) return translateCache.get(t);
@@ -946,7 +947,7 @@ function recordChat(psid, fromPage, text, by, extra) {
   // Non-English messages get an English translation for the console (admin messages are typed in English).
   if (entry.by !== "admin" && !entry.en && !/^\(.*\)$/.test(entry.text.trim())) {
     translateForConsole(entry.text).then((t) => {
-      if (!t) { if (entry.by === "customer" && entry.text.trim().length > 3) customerLang.delete(psid); return; }
+      if (!t) { if (entry.by === "customer" && /\p{L}{3,}/u.test(entry.text)) { customerLang.delete(psid); saveChatLog(psid); } return; }
       entry.en = t.english; entry.lang = t.language;
       if (entry.by === "customer") customerLang.set(psid, t.language);
       saveChatLog(psid);

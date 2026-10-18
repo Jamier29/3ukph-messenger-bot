@@ -290,7 +290,7 @@
       loadMedia();
       // Offer auto-translation when the customer's latest message wasn't in English.
       var lang = null;
-      for (var i = msgs.length - 1; i >= 0; i--) { if (!msgs[i].fromPage) { lang = msgs[i].lang || null; if (msgs[i].text.length > 3) break; } }
+      for (var i = msgs.length - 1; i >= 0; i--) { if (!msgs[i].fromPage && /[A-Za-z\u00C0-\uFFFF]{3,}/.test(msgs[i].text) && !/^\(.*\)$/.test(msgs[i].text)) { lang = msgs[i].lang || null; break; } }
       $("trRow").classList.toggle("hidden", !lang); if (lang) $("trLang").textContent = lang;
     }).catch(function () {});
   }
