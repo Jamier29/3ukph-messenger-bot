@@ -102,6 +102,17 @@ function toGB(value, unit) {
   return value; // assume GB
 }
 
+// Unlimited only when a field really says so (not just a key like "is_unlimited": false).
+function isUnlimited(d) {
+  let yes = false;
+  walk(d, (k, v) => {
+    if (yes) return;
+    if (/unlimited/i.test(k) && (v === true || v === 1 || /^(1|true|yes)$/i.test(String(v)))) yes = true;
+    else if (/(quantity|data|unit|amount|volume|allowance)/i.test(k) && typeof v === "string" && /^\s*unlimited\s*$/i.test(v)) yes = true;
+  });
+  return yes;
+}
+
 // Normalize whatever shape the API returns into a friendly summary.
 function summarize(raw) {
   const d = (raw && (raw.data || raw)) || {};
@@ -115,7 +126,7 @@ function summarize(raw) {
   return {
     total: fmt(total), used: fmt(used), remaining: fmt(remaining !== null ? remaining : (total !== null && used !== null ? total - used : null)),
     percentUsed: total ? Math.round(((used || 0) / total) * 100) : null,
-    unlimited: /unlimited/i.test(JSON.stringify(d).slice(0, 2000)) || undefined,
+    unlimited: isUnlimited(d) || undefined,
     status: pick("status", "sim_status", "bundle_status"),
     expires: pick("expiry_date", "expire_date", "end_date", "valid_until", "expired_at"),
     bundle: pick("bundle_name", "package_name", "name")

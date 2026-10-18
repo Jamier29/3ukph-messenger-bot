@@ -1607,6 +1607,7 @@ nav a.uk-btn-ghost{white-space:nowrap}
     requestAnimationFrame(function(){requestAnimationFrame(function(){arc.style.strokeDashoffset=String(CIRC*(1-frac));});});
     $('dcLeft').textContent = j.unlimited ? 'Unlimited' : (j.state==='expired' ? '0 GB' : (j.remaining||'–'));
     $('dcLeftSub').textContent = j.unlimited ? 'data plan' : (j.total ? 'left of '+j.total : 'left');
+    if(!j.unlimited && !j.total && !j.remaining){ $('dcLeft').textContent='—'; $('dcLeftSub').textContent='not available yet'; }
     $('dcUsed').textContent = j.used || (j.unlimited?'–':'0 GB');
     $('dcUsedSub').textContent = (j.percentUsed!==null&&j.percentUsed!==undefined&&!j.unlimited) ? j.percentUsed+'% of your plan' : '';
     var bar=$('dcBar'); bar.style.width='0'; bar.style.background=color;
@@ -1631,6 +1632,7 @@ nav a.uk-btn-ghost{white-space:nowrap}
     else if(j.state==='used_up') msg='You\'ve used all your data. Get a reload and keep the same eSIM where possible.';
     else if(!j.unlimited && tot && frac<=0.15) msg='Running low: only '+(j.remaining||'a little')+' left. Reload now so you don\'t get cut off in port.';
     else if(days!==null && days>=0 && days<=3) msg='Your plan ends in '+(days===0?'less than a day':days+(days===1?' day':' days'))+'. Reload before it expires.';
+    else if(!j.unlimited && !j.total && !j.remaining) msg='The network hasn\'t shared the data numbers for this eSIM yet. Try again later, or message us and we\'ll check for you.';
     else if(j.state==='not_active') msg='Your eSIM hasn\'t used data yet. Turn on the eSIM line and data roaming when you arrive.';
     w.textContent=msg; w.classList.toggle('on',!!msg);
     $('dcReload').href=WA+encodeURIComponent('Hi 3UK Philippines! I\'d like to reload my eSIM (ICCID ending '+j.iccidEnding+').'+(j.plan?' Current plan: '+j.plan+'.':''));
