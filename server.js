@@ -14,6 +14,7 @@ const express = require("express");
 const { BUSINESS_INFO } = require("./business-info");
 const { findPlansByText, getRawPlan, searchPlans, getPlan, listAllDestinations, getRate, headlinePrices, regionSummaries, formatPHP } = require("./planSearch");
 const QRCode = require("qrcode");
+const { brandedQr } = require("./qrcard");
 const { startPriceSync, syncPrices, getSyncStatus } = require("./priceSync");
 const crypto = require("crypto");
 const ExcelJS = require("exceljs");
@@ -1267,7 +1268,9 @@ app.post("/admin/api/deliver", requireAdmin, async (req, res) => {
     }
     const steps = [];
     if (sim.lpa) {
-      const png = await QRCode.toBuffer(sim.lpa, { width: 720, margin: 3, errorCorrectionLevel: "M" });
+      let png;
+      try { png = brandedQr(sim.lpa); } // 3UK-branded card; falls back to a plain QR
+      catch (e) { console.error("[deliver] branded QR failed:", e.message); png = await QRCode.toBuffer(sim.lpa, { width: 720, margin: 3, errorCorrectionLevel: "M" }); }
       await adminSendImage(psid, png, "image/png", `Your eSIM QR code: ${plan.name}`);
       steps.push("qr");
     }
