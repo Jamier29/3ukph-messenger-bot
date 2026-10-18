@@ -20,6 +20,8 @@ const reseller = require("./reseller");
 const esims = require("./esimcard");
 
 const app = express();
+// Admin image uploads (QR codes) are bigger than normal requests.
+app.use("/admin/api/send-image", express.json({ limit: "12mb" }));
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
@@ -1011,6 +1013,11 @@ app.get("/admin/api/media", requireAdmin, async (req, res) => {
   const media = entry && entry.media;
   if (!media) return res.status(404).json({ error: "No image." });
   try {
+    if (media.key) {
+      const saved = await loadSentImage(media.key);
+      if (saved) { res.set("Content-Type", saved.mime || "image/jpeg"); res.set("Cache-Control", "private, max-age=3600"); return res.send(saved.buf); }
+      if (media.src === "store") return res.status(410).json({ error: "This image is no longer stored." });
+    }
     let r;
     if (media.src === "wa") {
       const meta = await fetch(`https://graph.facebook.com/v21.0/${encodeURIComponent(media.id)}`, { headers: { Authorization: `Bearer ${WA_TOKEN}` } }).then((x) => x.json());
@@ -1095,6 +1102,83 @@ app.post("/admin/api/send", requireAdmin, async (req, res) => {
     sendAndLog();
     res.json({ ok: true, sentText: outText, messageId: data.message_id });
   } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
+// Admin sends an image (eSIM QR code, receipt) from the console. Body: { psid, image: dataURL, caption? }
+const sentImages = new Map(); // entryId -> { mime, buf } (recent, also saved in Upstash 30 days)
+async function storeSentImage(key, mime, buf) {
+  sentImages.set(key, { mime, buf });
+  while (sentImages.size > 60) sentImages.delete(sentImages.keys().next().value);
+  if (UPSTASH_URL && UPSTASH_TOKEN) {
+    try { await redis(["SET", `img:${key}`, JSON.stringify({ mime, b64: buf.toString("base64") }), "EX", 30 * 24 * 3600]); }
+    catch (e) { console.error("[send-image] couldn't save a copy for the console:", e.message); }
+  }
+}
+async function loadSentImage(key) {
+  if (sentImages.has(key)) return sentImages.get(key);
+  if (!(UPSTASH_URL && UPSTASH_TOKEN)) return null;
+  const v = await redis(["GET", `img:${key}`]).catch(() => null);
+  if (!v) return null;
+  const d = JSON.parse(v); return { mime: d.mime, buf: Buffer.from(d.b64, "base64") };
+}
+app.post("/admin/api/send-image", requireAdmin, async (req, res) => {
+  const b = req.body || {};
+  const psid = String(b.psid || "");
+  if (!/^(wa)?\d+$/.test(psid)) return res.status(400).json({ error: "Pick a conversation first." });
+  const m = String(b.image || "").match(/^data:(image\/(?:png|jpe?g|webp|gif));base64,([A-Za-z0-9+/=]+)$/);
+  if (!m) return res.status(400).json({ error: "Please choose a PNG or JPG image." });
+  let mime = m[1] === "image/jpg" ? "image/jpeg" : m[1];
+  const buf = Buffer.from(m[2], "base64");
+  if (buf.length > 8 * 1024 * 1024) return res.status(400).json({ error: "Image is too big (max 8 MB)." });
+  let caption = String(b.caption || "").trim().slice(0, 1000);
+  let capExtra;
+  const lang = customerLang.get(psid);
+  if (caption && b.translate && lang) {
+    try { const t = (await translateTo(caption, lang)).slice(0, 1000); if (t) { capExtra = { en: caption, lang }; caption = t; } } catch (e) { /* send in English */ }
+  }
+  const ext = mime === "image/png" ? "png" : mime === "image/webp" ? "webp" : mime === "image/gif" ? "gif" : "jpg";
+  try {
+    let media, messageId;
+    if (isWa(psid)) {
+      const fd = new FormData();
+      fd.append("messaging_product", "whatsapp");
+      fd.append("type", mime);
+      fd.append("file", new Blob([buf], { type: mime }), `image.${ext}`);
+      const up = await fetch(`https://graph.facebook.com/v21.0/${WA_PHONE_NUMBER_ID}/media`, { method: "POST", headers: { Authorization: `Bearer ${WA_TOKEN}` }, body: fd });
+      const ud = await up.json().catch(() => ({}));
+      if (!up.ok || !ud.id) return res.status(502).json({ error: "WhatsApp didn't accept the image: " + ((ud.error && ud.error.message) || up.status) });
+      const data = await waSend(psid, { type: "image", image: caption ? { id: ud.id, caption } : { id: ud.id } });
+      if (!data) return res.status(502).json({ error: "WhatsApp didn't deliver the image. If the customer's last message was more than 24 hours ago, WhatsApp only allows template messages." });
+      messageId = data.messages && data.messages[0] && data.messages[0].id;
+      media = { src: "wa", id: ud.id, mime };
+    } else {
+      const fd = new FormData();
+      fd.append("recipient", JSON.stringify({ id: psid }));
+      fd.append("messaging_type", "RESPONSE");
+      fd.append("message", JSON.stringify({ attachment: { type: "image", payload: { is_reusable: false } } }));
+      fd.append("filedata", new Blob([buf], { type: mime }), `image.${ext}`);
+      const r = await fetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${encodeURIComponent(PAGE_ACCESS_TOKEN)}`, { method: "POST", body: fd });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) return res.status(502).json({ error: (data.error && data.error.message) || `Facebook error ${r.status}` });
+      messageId = data.message_id; rememberAdminSent(messageId);
+      if (caption) {
+        const r2 = await fetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${encodeURIComponent(PAGE_ACCESS_TOKEN)}`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ recipient: { id: psid }, messaging_type: "RESPONSE", message: { text: caption } })
+        });
+        const d2 = await r2.json().catch(() => ({}));
+        if (r2.ok) rememberAdminSent(d2.message_id);
+      }
+      media = { src: "store", mime };
+    }
+    pauseBot(psid);
+    const key = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    await storeSentImage(key, mime, buf);
+    media.key = key;
+    recordChat(psid, true, caption ? "(image) " + caption : "(image)", "admin", { media, ...(capExtra || {}) });
+    appendNote(psid, "[ADMIN UPDATE: The admin just sent the customer an image" + (caption ? ` with the message: "${caption.slice(0, 200)}"` : "") + ". If it was the eSIM QR code, help them install it if they ask.]");
+    res.json({ ok: true, messageId });
+  } catch (e) { console.error("[send-image] failed:", e.message); res.status(502).json({ error: e.message }); }
 });
 
 // --- Reseller program (approve resellers, upload private costs) ---

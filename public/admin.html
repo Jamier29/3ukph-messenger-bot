@@ -23,6 +23,12 @@
   main { max-width:1100px; margin:0 auto; padding:20px 16px 40px; }
   .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px; margin-bottom:16px; }
   .msg img.media { display:block; max-width:240px; max-height:320px; border-radius:10px; margin:2px 0 4px; cursor:zoom-in; background:#e9edf5; min-height:60px; min-width:80px; }
+  .msg .dl { display:inline-block; font-size:12px; font-weight:600; margin:0 0 4px; color:inherit; opacity:.9; text-decoration:underline; cursor:pointer; }
+  .attach { display:flex; align-items:center; gap:12px; margin-top:8px; padding:8px; border:1px dashed var(--navy); border-radius:10px; background:#eef1fb; }
+  .attach img { width:72px; height:72px; object-fit:contain; background:#fff; border-radius:8px; border:1px solid var(--line); }
+  .attach .info { flex:1; font-size:13px; color:var(--muted); }
+  .attach .info b { color:#151a2d; display:block; font-size:14px; }
+  .dropping textarea { outline:3px dashed var(--navy); outline-offset:2px; }
   .msg .tr { display:block; margin-top:6px; padding-top:6px; border-top:1px dashed rgba(0,0,0,.2); font-size:13px; opacity:.85; }
   .msg.out .tr { border-top-color:rgba(255,255,255,.35); }
   .step { display:inline-block; background:var(--gold); color:var(--navy); font-weight:700; font-size:12px; border-radius:20px; padding:3px 10px; margin-bottom:6px; }
@@ -109,8 +115,8 @@
       <!-- Step 3: send -->
       <section class="card">
         <span class="step">Step 3</span>
-        <h2>Send a reply to Messenger</h2>
-        <p class="help">Type a message and click <b>Send to Messenger</b>. It is delivered instantly to the customer's Messenger app as a message from the Page. While an admin is replying, the AI assistant pauses in this chat; click <b>Resume AI assistant</b> to turn it back on.</p>
+        <h2>Send a reply</h2>
+        <p class="help">Type a message and click <b>Send</b>. To send the eSIM QR code or any picture, tap <b>📎 Image</b> (or paste / drag the image here); your typed message goes with it. Tap <b>⬇ Download</b> under any image in the chat to save it. While an admin is replying, the AI assistant pauses in this chat; click <b>Resume AI assistant</b> to turn it back on.</p>
         <div class="row" style="justify-content:space-between;margin-bottom:8px">
           <b id="chatTitle">No conversation selected</b>
           <span id="botBadge"></span>
@@ -120,7 +126,14 @@
         <label class="hidden" id="trRow" style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:14px">
           <input type="checkbox" id="trChk" checked> 🌐 Type in English, send in <b id="trLang"></b> (auto-translate)
         </label>
+        <div class="attach hidden" id="attachBox">
+          <img id="attachPrev" alt="Image to send">
+          <div class="info"><b id="attachName">image</b><span id="attachInfo"></span><br>Your message above (if any) is sent with the image.</div>
+          <button class="ghost" id="attachRemove" type="button" title="Remove this image">✕ Remove</button>
+        </div>
+        <input type="file" id="imgFile" accept="image/png,image/jpeg,image/webp" class="hidden">
         <div class="row" style="margin-top:10px">
+          <button class="ghost" id="imgBtn" disabled type="button" title="Attach an image (eSIM QR code, receipt). You can also paste or drag an image here.">📎 Image</button>
           <button class="red" id="sendBtn" disabled title="Send this message to the customer's Messenger">Send to Messenger</button>
           <button class="ghost hidden" id="resumeBtn" title="Let the AI assistant answer this customer again">Resume AI assistant</button>
         </div>
@@ -262,7 +275,7 @@
   function openConversation(c) {
     current = c;
     $("chatTitle").textContent = "Chat with " + c.customerName;
-    $("msgInput").disabled = false; $("sendBtn").disabled = false;
+    $("msgInput").disabled = false; $("sendBtn").disabled = false; $("imgBtn").disabled = false; clearAttach();
     $("sendStatus").textContent = "";
     setBotBadge(c.botPaused);
     $("sendBtn").textContent = "Send to " + (c.channel || "Messenger"); $("trRow").classList.add("hidden");
@@ -282,7 +295,7 @@
       t.innerHTML = msgs.map(function (m) {
         var tr = m.en ? '<span class="tr">🌐 ' + (m.fromPage && m.fromName && /admin/.test(m.fromName) ? "You wrote" : "English") + ": " + esc(m.en) + "</span>" : "";
         var body = m.hasMedia
-          ? (/pdf|document/i.test(m.mediaType || "") ? '<a href="#" class="media-doc" data-id="' + esc(m.id) + '">📄 Open document</a>' : '<img class="media" data-id="' + esc(m.id) + '" alt="image" src="' + (mediaCache[m.id] || "") + '">') + (m.text && m.text !== "(image)" ? "<br>" + esc(m.text.replace(/^\(image\)\s*/, "")) : "")
+          ? (/pdf|document/i.test(m.mediaType || "") ? '<a href="#" class="media-doc" data-id="' + esc(m.id) + '">📄 Open document</a>' : '<img class="media" data-id="' + esc(m.id) + '" alt="image" src="' + (mediaCache[m.id] || "") + '"><a class="dl" data-id="' + esc(m.id) + '">⬇ Download</a>') + (m.text && m.text !== "(image)" ? "<br>" + esc(m.text.replace(/^\(image\)\s*/, "")) : "")
           : esc(m.text);
         return '<div class="msg ' + (m.fromPage ? "out" : "in") + '">' + body + tr + "<small>" + (m.fromPage ? "3UK Philippines" : esc(m.fromName)) + " · " + fmt(m.time) + "</small></div>";
       }).join("") || '<span class="help">No messages.</span>';
@@ -296,11 +309,11 @@
   }
 
   // Images in chats are fetched with the admin key, then shown from memory.
-  var mediaCache = {}, mediaLoading = {};
+  var mediaCache = {}, mediaLoading = {}, mediaType = {};
   function fetchMedia(id) {
     return fetch("/admin/api/media?psid=" + encodeURIComponent(current.psid) + "&id=" + encodeURIComponent(id), { headers: { "x-admin-key": key } })
       .then(function (r) { if (!r.ok) throw new Error("not available"); return r.blob(); })
-      .then(function (b) { mediaCache[id] = URL.createObjectURL(b); return mediaCache[id]; });
+      .then(function (b) { mediaType[id] = b.type || "image/jpeg"; mediaCache[id] = URL.createObjectURL(b); return mediaCache[id]; });
   }
   function loadMedia() {
     Array.prototype.forEach.call(document.querySelectorAll("#thread img.media"), function (img) {
@@ -309,6 +322,17 @@
       if (mediaCache[id]) { img.src = mediaCache[id]; return; }
       if (mediaLoading[id]) return; mediaLoading[id] = true;
       fetchMedia(id).then(function (u) { img.src = u; }).catch(function () { img.replaceWith(document.createTextNode("(image not available)")); });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("#thread a.dl"), function (a) {
+      a.onclick = function (e) {
+        e.preventDefault(); var id = a.getAttribute("data-id");
+        (mediaCache[id] ? Promise.resolve(mediaCache[id]) : fetchMedia(id)).then(function (u) {
+          var t = mediaType[id] || "image/jpeg", ext = /png/.test(t) ? "png" : /webp/.test(t) ? "webp" : /gif/.test(t) ? "gif" : /pdf/.test(t) ? "pdf" : "jpg";
+          var name = ((current && current.customerName) || "chat").replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "") || "chat";
+          var x = document.createElement("a"); x.href = u; x.download = "3UKPH-" + name + "-" + id + "." + ext;
+          document.body.appendChild(x); x.click(); setTimeout(function () { x.remove(); }, 500);
+        }).catch(function () { alert("Image not available."); });
+      };
     });
     Array.prototype.forEach.call(document.querySelectorAll("#thread a.media-doc"), function (a) {
       a.onclick = function (e) { e.preventDefault(); var id = a.getAttribute("data-id"); (mediaCache[id] ? Promise.resolve(mediaCache[id]) : fetchMedia(id)).then(function (u) { window.open(u, "_blank"); }).catch(function () { alert("Document not available."); }); };
@@ -371,7 +395,64 @@
     });
   }
 
+  // ---- Image attach (eSIM QR codes etc.): button, paste, or drag & drop ----
+  var attached = null; // { dataUrl, name, size }
+  function clearAttach() { attached = null; $("attachBox").classList.add("hidden"); $("imgFile").value = ""; }
+  function kb(n) { return n > 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB"; }
+  function readImage(file) {
+    if (!file || !/^image\//.test(file.type)) { $("sendStatus").className = "status err"; $("sendStatus").textContent = "Please choose an image (PNG or JPG)."; return; }
+    if (file.size > 20 * 1048576) { $("sendStatus").className = "status err"; $("sendStatus").textContent = "That image is too big (max 20 MB)."; return; }
+    var fr = new FileReader();
+    fr.onload = function () {
+      var src = fr.result, img = new Image();
+      img.onload = function () {
+        // Keep small PNGs (QR codes) exactly as they are; shrink big photos so they send fast.
+        var keep = (file.type === "image/png" && file.size <= 600 * 1024) || (file.type === "image/jpeg" && file.size <= 600 * 1024 && Math.max(img.width, img.height) <= 2000);
+        var out = src, type = file.type;
+        if (!keep) {
+          var scale = Math.min(1, 1600 / Math.max(img.width, img.height));
+          var c = document.createElement("canvas"); c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
+          var g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height);
+          out = c.toDataURL("image/jpeg", 0.9); type = "image/jpeg";
+        }
+        var bytes = Math.round((out.length - out.indexOf(",") - 1) * 3 / 4);
+        attached = { dataUrl: out, name: file.name || "pasted-image", size: bytes };
+        $("attachPrev").src = out; $("attachName").textContent = attached.name;
+        $("attachInfo").textContent = img.width + "×" + img.height + " · " + kb(bytes) + (keep ? "" : " (resized to send faster)");
+        $("attachBox").classList.remove("hidden"); $("sendStatus").textContent = "";
+      };
+      img.onerror = function () { $("sendStatus").className = "status err"; $("sendStatus").textContent = "Couldn't read that image."; };
+      img.src = src;
+    };
+    fr.readAsDataURL(file);
+  }
+  $("imgBtn").onclick = function () { $("imgFile").click(); };
+  $("imgFile").onchange = function () { if (this.files && this.files[0]) readImage(this.files[0]); };
+  $("attachRemove").onclick = clearAttach;
+  document.addEventListener("paste", function (e) {
+    if (!current || !e.clipboardData) return;
+    var items = e.clipboardData.items || [];
+    for (var i = 0; i < items.length; i++) if (items[i].kind === "file" && /^image\//.test(items[i].type)) { e.preventDefault(); readImage(items[i].getAsFile()); return; }
+  });
+  ["dragover", "dragenter"].forEach(function (ev) { document.addEventListener(ev, function (e) { if (!current) return; if (e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], "Files") >= 0) { e.preventDefault(); document.body.classList.add("dropping"); } }); });
+  ["dragleave", "drop"].forEach(function (ev) { document.addEventListener(ev, function (e) { if (ev === "dragleave" && e.relatedTarget) return; document.body.classList.remove("dropping"); }); });
+  document.addEventListener("drop", function (e) { if (!current || !e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return; e.preventDefault(); readImage(e.dataTransfer.files[0]); });
+
+  function sendImage() {
+    var caption = $("msgInput").value.trim();
+    $("sendBtn").disabled = true; $("imgBtn").disabled = true; $("sendStatus").className = "status"; $("sendStatus").textContent = "Sending image…";
+    api("/admin/api/send-image", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ psid: current.psid, image: attached.dataUrl, caption: caption, translate: !$("trRow").classList.contains("hidden") && $("trChk").checked }) })
+      .then(function () {
+        $("sendStatus").className = "status ok"; $("sendStatus").textContent = "✓ Image delivered to " + (current.channel || "Messenger");
+        $("msgInput").value = ""; clearAttach(); setBotBadge(true); loadMessages();
+        var t = $("thread"); setTimeout(function () { t.scrollTop = t.scrollHeight; }, 800);
+      })
+      .catch(function (e) { $("sendStatus").className = "status err"; $("sendStatus").textContent = "Image not sent: " + e.message; })
+      .then(function () { $("sendBtn").disabled = false; $("imgBtn").disabled = false; });
+  }
+
   function send() {
+    if (attached && current) return sendImage();
     var text = $("msgInput").value.trim();
     if (!text || !current) return;
     $("sendBtn").disabled = true; $("sendStatus").className = "status"; $("sendStatus").textContent = "Sending…";
