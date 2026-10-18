@@ -1445,7 +1445,7 @@ nav a.uk-btn-ghost{white-space:nowrap}
 .dc-stat{background:var(--surface-raised);border-radius:var(--radius-md);padding:12px}
 .dc-stat small{display:block;font-size:12px;font-weight:700;color:var(--ink-muted);text-transform:uppercase;letter-spacing:.5px}
 .dc-stat b{display:block;font-size:17px;margin-top:4px;line-height:1.25}
-.dc-stat em{display:block;font-style:normal;font-size:12px;color:var(--ink-muted);margin-top:2px}
+.dc-stat em{display:block;white-space:pre-line;font-style:normal;font-size:12px;color:var(--ink-muted);margin-top:2px}
 .dc-bar{height:8px;border-radius:99px;background:var(--hairline);overflow:hidden;margin-top:8px}
 .dc-bar i{display:block;height:100%;width:0;background:var(--brand-blue);transition:width .9s cubic-bezier(.2,.8,.2,1)}
 .dc-warn{display:none;margin:12px 0 4px;padding:10px 12px;border-radius:var(--radius-md);font-size:13px;line-height:1.45;background:#fff5d6;color:#6b4a00;border:1px solid #f1d27a}
@@ -1623,7 +1623,7 @@ nav a.uk-btn-ghost{white-space:nowrap}
       var bought = j.purchasedAt ? 'Bought '+fmtDate(new Date(j.purchasedAt)) : '';
       expL.textContent='Validity';
       exp.textContent = j.validityDays ? j.validityDays+' days' : '—';
-      expSub.textContent = (j.state==='not_active' ? 'Starts when it first connects abroad' : 'Counted from first connection') + (bought ? ' · '+bought : '');
+      expSub.textContent = (j.state==='not_active' ? 'Starts when it first connects abroad' : 'Counted from first connection') + (bought ? '\n'+bought : '');
     }
     // Warnings
     var w=$('dcWarn'), msg='';
