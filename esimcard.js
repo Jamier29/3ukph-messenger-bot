@@ -181,10 +181,27 @@ async function details(iccid) {
   iccid = cleanIccid(iccid);
   const c = detailCache.get(iccid);
   if (c && Date.now() - c.at < 30 * 60000) return c.data;
-  let data = null;
-  for (const path of [`my-sim/${iccid}`, `my-sim/${iccid}/packages`]) {
-    try { data = { ...(data || {}), [path.endsWith("packages") ? "packages" : "sim"]: await call(path) }; } catch (e) { /* not available on this account */ }
-  }
+  const data = { tried: {} };
+  const attempt = async (key, path) => {
+    try { data[key] = await call(path); data.tried[path] = "ok"; return true; }
+    catch (e) { data.tried[path] = String(e.message || e).slice(0, 80); return false; }
+  };
+  await attempt("sim", `my-sim/${iccid}`);
+  // The list of our eSIMs usually carries dates/packages for each SIM.
+  try {
+    for (let page = 1; page <= 10; page++) {
+      const d = await call(`my-esims?page=${page}`);
+      const list = Array.isArray(d) ? d : (d.data && Array.isArray(d.data) ? d.data : (d.data && Array.isArray(d.data.data) ? d.data.data : []));
+      const hit = list.find((x) => cleanIccid(x.iccid || (x.sim && x.sim.iccid)) === iccid);
+      if (hit) { data.listEntry = hit; break; }
+      if (!list.length) break;
+    }
+    data.tried["my-esims"] = data.listEntry ? "ok" : "not in list";
+  } catch (e) { data.tried["my-esims"] = String(e.message || e).slice(0, 80); }
+  const id = data.listEntry && (data.listEntry.id || data.listEntry.sim_id || data.listEntry.uuid);
+  if (id && !data.sim) await attempt("sim", `my-sim/${id}`);
+  if (id) await attempt("packages", `my-sim/${id}/packages`);
+  else await attempt("packages", `my-sim/${iccid}/packages`);
   detailCache.set(iccid, { at: Date.now(), data });
   return data;
 }
