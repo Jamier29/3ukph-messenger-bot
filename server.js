@@ -1283,6 +1283,7 @@ app.post("/admin/api/deliver", requireAdmin, async (req, res) => {
     if (sim.iccid) lines.push("", `🔖 ICCID: ${sim.iccid}`);
     lines.push("", "The QR usually works only once, so don't delete the eSIM after installing. When you arrive, turn on the eSIM line and data roaming.", "Need help? Just reply here 💬");
     if (sim.iccid) lines.push("", `📊 Check your data anytime: https://3ukph.com/data?iccid=${sim.iccid}`);
+    lines.push("", "📲 Get our free app for one-tap reloads and data checks: open 3ukph.com and tap Install (iPhone: Safari › Share › Add to Home Screen).");
     await adminSendText(psid, lines.join("\n"));
     steps.push("text");
     const order = await getLastOrder(psid);
