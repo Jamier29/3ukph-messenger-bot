@@ -1,0 +1,24 @@
+{
+  "name": "3UK Philippines eSIM",
+  "short_name": "3UK eSIM",
+  "description": "Travel and seafarer eSIMs: plans, 24/7 chat, and live data check.",
+  "id": "/?app=3ukph",
+  "start_url": "/?source=app",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#00166a",
+  "lang": "en",
+  "categories": ["travel", "utilities"],
+  "icons": [
+    { "src": "/app/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/app/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/app/maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/app/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Check my data", "short_name": "My data", "url": "/?source=app#check-data", "icons": [{ "src": "/app/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Chat with us", "short_name": "Chat", "url": "/chat?source=app", "icons": [{ "src": "/app/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Find a plan", "short_name": "Plans", "url": "/?source=app#finder", "icons": [{ "src": "/app/icon-192.png", "sizes": "192x192" }] }
+  ]
+}

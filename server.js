@@ -825,6 +825,9 @@ app.get("/sitemap.xml", (req, res) => res.type("application/xml").send(
 app.get("/logo.png", (req, res) => res.sendFile(path.join(__dirname, "public", "logo.png")));
 // BIR Registration Seal Badge (RMC 38-2026) shown on the website header and footer
 app.get("/bir-seal-badge.png", (req, res) => res.sendFile(path.join(__dirname, "public", "bir-seal-badge.png"), { maxAge: "7d" }));
+// Customer app (installable website): manifest + icons under /app, service worker at /sw.js
+app.use("/app", express.static(path.join(__dirname, "public", "app"), { maxAge: "1d" }));
+app.get("/sw.js", (req, res) => { res.set("Cache-Control", "no-cache"); res.set("Service-Worker-Allowed", "/"); res.type("application/javascript").sendFile(path.join(__dirname, "public", "app", "sw.js")); });
 app.get("/favicon.png", (req, res) => res.sendFile(path.join(__dirname, "public", "favicon.png")));
 // Public plan-finder API used by the website (peso prices only, no cost data)
 app.get("/api/destinations", (req, res) => res.json(listAllDestinations()));

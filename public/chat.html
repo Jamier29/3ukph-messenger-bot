@@ -2,6 +2,7 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Chat with 3UK Philippines</title>
 <meta name="description" content="Chat with 3UK Philippines on WhatsApp or Messenger. Travel and seafarer eSIMs, 24/7, delivered in about 5 minutes.">
+<meta name="theme-color" content="#00166a">
 <link rel="icon" href="/favicon.png">
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
@@ -16,7 +17,12 @@ a.opt.wa{border-color:#25d366}a.opt svg{width:40px;height:40px;flex:none}a.opt b
 .tag{margin-left:auto;background:#25d366;color:#05351a;font-weight:700;font-size:11px;padding:4px 9px;border-radius:999px;white-space:nowrap}
 .more{margin-top:18px;font-size:14px}.more a{color:inherit;font-weight:700}
 .code{display:inline-block;margin-top:14px;font-size:13px;color:var(--muted)}.code b{color:#cf0507}
-</style></head>
+</style><link rel="manifest" href="/app/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/app/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="3UK eSIM">
+<meta name="mobile-web-app-capable" content="yes">
+</head>
 <body><main>
 <img class="logo" src="/logo.png" alt="3UK Philippines logo">
 <h1>Chat with 3UK Philippines</h1>
@@ -28,5 +34,66 @@ a.opt.wa{border-color:#25d366}a.opt svg{width:40px;height:40px;flex:none}a.opt b
 <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="16" fill="#0866ff"/><path fill="#fff" d="M16 7c-5 0-9 3.7-9 8.4 0 2.6 1.3 5 3.4 6.5V25l3.1-1.7c.8.2 1.7.4 2.5.4 5 0 9-3.7 9-8.3S21 7 16 7zm.9 11.2-2.3-2.4-4.5 2.4 5-5.3 2.3 2.4 4.4-2.4-4.9 5.3z"/></svg>
 <span><b>Messenger</b><small>3UK Philippines on Facebook</small></span></a>
 <span class="code">New customer? Use code <b>WELCOME10</b> for 10% off your first eSIM.</span>
-<p class="more"><a href="/data">Check my data left</a> · <a href="/">See all plans and prices</a></p>
-</main></body></html>
+<p class="more"><a href="/data">Check my data left</a> · <a href="#" data-install>Install app</a> · <a href="/">See all plans and prices</a></p>
+</main><!-- Install as an app (Android / iPhone / computer) -->
+<style>
+.pwa-bar{position:fixed;left:12px;right:12px;bottom:12px;z-index:80;max-width:520px;margin:0 auto;display:none;align-items:center;gap:12px;background:#fff;color:#0b1233;border-radius:18px;padding:12px 12px 12px 12px;box-shadow:0 14px 40px rgba(0,10,40,.35);font-family:Montserrat,"Segoe UI",system-ui,sans-serif;border:1px solid #e3e6f0}
+.pwa-bar.on{display:flex}
+.pwa-bar img{width:48px;height:48px;border-radius:12px;flex:none;border:1px solid #e3e6f0}
+.pwa-bar b{display:block;font-size:15px;line-height:1.2}
+.pwa-bar span{display:block;font-size:12.5px;color:#4a5170;margin-top:2px}
+.pwa-bar .t{flex:1;min-width:0}
+.pwa-bar button{border:0;border-radius:12px;font:700 14px Montserrat,"Segoe UI",sans-serif;cursor:pointer}
+.pwa-go{background:#cf0507;color:#fff;padding:11px 16px}
+.pwa-x{background:transparent;color:#4a5170;padding:8px;font-size:18px!important}
+.pwa-ios{position:fixed;inset:0;z-index:96;background:rgba(0,10,40,.6);display:none;align-items:flex-end;justify-content:center;padding:12px;font-family:Montserrat,"Segoe UI",system-ui,sans-serif}
+.pwa-ios.on{display:flex}
+.pwa-ios .card{background:#fff;color:#0b1233;border-radius:20px;max-width:420px;width:100%;padding:20px}
+.pwa-ios h3{margin:0 0 10px;font-size:19px}
+.pwa-ios ol{margin:0 0 14px;padding-left:20px;font-size:15px;line-height:1.6}
+.pwa-ios button{width:100%;border:0;border-radius:12px;background:#00166a;color:#fff;font:700 15px Montserrat,sans-serif;padding:12px;cursor:pointer}
+@media (prefers-color-scheme: dark){.pwa-bar,.pwa-ios .card{background:#161b36;color:#f3f5fb;border-color:#252b4a}.pwa-bar span{color:#a9b0cc}.pwa-x{color:#a9b0cc}}
+</style>
+<div class="pwa-bar" id="pwaBar" role="region" aria-label="Install app">
+  <img src="/app/icon-192.png" alt="">
+  <div class="t"><b>Get the 3UK eSIM app</b><span>Plans, 24/7 chat and data check in one tap</span></div>
+  <button type="button" class="pwa-go" id="pwaGo">Install</button>
+  <button type="button" class="pwa-x" id="pwaX" aria-label="Not now">✕</button>
+</div>
+<div class="pwa-ios" id="pwaIos" role="dialog" aria-modal="true" aria-labelledby="pwaIosT">
+  <div class="card">
+    <h3 id="pwaIosT">Add 3UK eSIM to your Home Screen</h3>
+    <ol>
+      <li>Open this page in <b>Safari</b>.</li>
+      <li>Tap the <b>Share</b> button (the square with an arrow ↑).</li>
+      <li>Scroll down and tap <b>Add to Home Screen</b>, then <b>Add</b>.</li>
+    </ol>
+    <button type="button" id="pwaIosOk">Got it</button>
+  </div>
+</div>
+<script>
+(function(){
+  if ('serviceWorker' in navigator) { window.addEventListener('load', function(){ navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function(){}); }); }
+  var standalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  var ua = navigator.userAgent || '', isIOS = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  var bar = document.getElementById('pwaBar'), ios = document.getElementById('pwaIos'), deferred = null;
+  function snoozed(){ try { return Date.now() - Number(localStorage.getItem('pwaSnooze') || 0) < 14 * 864e5; } catch(e){ return false; } }
+  function snooze(){ try { localStorage.setItem('pwaSnooze', String(Date.now())); } catch(e){} bar.classList.remove('on'); }
+  function show(){ if (!standalone && !snoozed()) bar.classList.add('on'); }
+  function install(){
+    if (deferred) { deferred.prompt(); deferred.userChoice.then(function(){ deferred = null; snooze(); }); return; }
+    if (isIOS) { ios.classList.add('on'); return; }
+    alertless();
+  }
+  function alertless(){ ios.querySelector('h3').textContent = 'Install 3UK eSIM'; ios.querySelector('ol').innerHTML = '<li>On Android (Chrome): tap the ⋮ menu, then <b>Install app</b> or <b>Add to Home screen</b>.</li><li>On a computer (Chrome or Edge): click the install icon in the address bar.</li>'; ios.classList.add('on'); }
+  window.addEventListener('beforeinstallprompt', function(e){ e.preventDefault(); deferred = e; setTimeout(show, 6000); });
+  window.addEventListener('appinstalled', function(){ snooze(); });
+  if (isIOS && !standalone) setTimeout(show, 8000);
+  document.getElementById('pwaGo').onclick = install;
+  document.getElementById('pwaX').onclick = snooze;
+  document.getElementById('pwaIosOk').onclick = function(){ ios.classList.remove('on'); snooze(); };
+  ios.addEventListener('click', function(e){ if (e.target === ios) ios.classList.remove('on'); });
+  document.addEventListener('click', function(e){ var a = e.target.closest && e.target.closest('[data-install]'); if (!a) return; e.preventDefault(); install(); });
+})();
+</script>
+</body></html>
