@@ -1279,7 +1279,6 @@ app.post("/admin/api/deliver", requireAdmin, async (req, res) => {
     }
     const lines = [`✅ Your eSIM is ready! ${plan.name}`, "", "📲 How to install (on Wi-Fi, before you travel):", "1️⃣ Easiest: scan the QR code above using your phone's eSIM settings (show it on another screen or ask someone to show it)."];
     lines.push("2️⃣ Only this one phone? Save the QR image. iPhone: open it in Photos, press and hold the QR, tap \"Add eSIM\". Android: Settings › SIM manager › Add eSIM › Scan QR › tap the gallery icon and pick the image.");
-    if (sim.ios) lines.push(`3️⃣ iPhone (iOS 17.4+) one-tap link, open it in Safari: ${sim.ios}`);
     if (sim.smdp && sim.matching) lines.push("", "Or type it in manually (Add eSIM › Enter details manually):", `SM-DP+ address: ${sim.smdp}`, `Activation code: ${sim.matching}`);
     if (sim.iccid) lines.push("", `🔖 ICCID: ${sim.iccid}`);
     lines.push("", "The QR usually works only once, so don't delete the eSIM after installing. When you arrive, turn on the eSIM line and data roaming.", "Need help? Just reply here 💬");
