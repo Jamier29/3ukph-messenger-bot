@@ -1780,17 +1780,19 @@ nav a.uk-btn-ghost{white-space:nowrap}
   var standalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
   var ua = navigator.userAgent || '', isIOS = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   var bar = document.getElementById('pwaBar'), ios = document.getElementById('pwaIos'), deferred = null;
-  function snoozed(){ try { return Date.now() - Number(localStorage.getItem('pwaSnooze') || 0) < 14 * 864e5; } catch(e){ return false; } }
-  function snooze(){ try { localStorage.setItem('pwaSnooze', String(Date.now())); } catch(e){} bar.classList.remove('on'); }
+  // Closing hides it for this visit; it comes back on the next visit. After 3 closes it rests for 3 days.
+  function snoozed(){ try { if (sessionStorage.getItem('pwaHide')) return true; return Date.now() - Number(localStorage.getItem('pwaSnooze') || 0) < 3 * 864e5; } catch(e){ return false; } }
+  function snooze(){ try { sessionStorage.setItem('pwaHide', '1'); var n = Number(localStorage.getItem('pwaCloses') || 0) + 1; if (n >= 3) { localStorage.setItem('pwaSnooze', String(Date.now())); n = 0; } localStorage.setItem('pwaCloses', String(n)); } catch(e){} bar.classList.remove('on'); }
+  function installedNow(){ try { localStorage.setItem('pwaSnooze', String(Date.now() + 3650 * 864e5)); } catch(e){} bar.classList.remove('on'); }
   function show(){ if (!standalone && !snoozed()) bar.classList.add('on'); }
   function install(){
-    if (deferred) { deferred.prompt(); deferred.userChoice.then(function(){ deferred = null; snooze(); }); return; }
+    if (deferred) { deferred.prompt(); deferred.userChoice.then(function(c){ deferred = null; if (c && c.outcome === 'accepted') installedNow(); else snooze(); }); return; }
     if (isIOS) { ios.classList.add('on'); return; }
     alertless();
   }
   function alertless(){ ios.querySelector('h3').textContent = 'Install 3UK eSIM'; ios.querySelector('ol').innerHTML = '<li>On Android (Chrome): tap the ⋮ menu, then <b>Install app</b> or <b>Add to Home screen</b>.</li><li>On a computer (Chrome or Edge): click the install icon in the address bar.</li>'; ios.classList.add('on'); }
   window.addEventListener('beforeinstallprompt', function(e){ e.preventDefault(); deferred = e; setTimeout(show, 6000); });
-  window.addEventListener('appinstalled', function(){ snooze(); });
+  window.addEventListener('appinstalled', function(){ installedNow(); });
   if (isIOS && !standalone) setTimeout(show, 8000);
   document.getElementById('pwaGo').onclick = install;
   document.getElementById('pwaX').onclick = snooze;
