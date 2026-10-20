@@ -496,6 +496,7 @@ async function runTool(name, input, senderId) {
         const customer = await getCustomerName(senderId);
         await notifyAdmin({
           title: `${resellerTag}order: ${plan.price} paid from WALLET`,
+          priority: "urgent",
           message:
             `Reseller: ${customer}${member.name ? ` (${member.name})` : ""}\n` +
             `Plan: ${planLabel}\n` +
@@ -667,6 +668,7 @@ async function runTool(name, input, senderId) {
       const customer = await getCustomerName(senderId);
       await notifyAdmin({
         title: `New reseller application (${input.tier || "Starter"})`,
+        priority: "high",
         message:
           `Facebook name: ${customer}\nName: ${input.name}\nContact: ${input.contact}\n` +
           (input.sellsTo ? `Sells to: ${input.sellsTo}\n` : "") +
@@ -1690,6 +1692,7 @@ async function handleMessagingEvent(event) {
       const customer = await getCustomerName(senderId);
       await notifyAdmin({
         title: "Payment screenshot received",
+        priority: "urgent",
         message: `Customer: ${customer} sent an image (likely proof of payment). Please verify it in the page inbox and send the eSIM QR.`,
         tags: "receipt"
       });
@@ -1842,7 +1845,10 @@ function cleanForMessenger(text) {
 // ---------------------------------------------------------------------
 // Admin alerts via ntfy.sh (free phone push notifications with sound).
 // ---------------------------------------------------------------------
-async function notifyAdmin({ title, message, tags }) {
+// priority: "urgent" (5) for payments to confirm, "high" (4) for new reseller
+// applications, "default" (3) for everything else. On Android each ntfy priority
+// has its own notification channel, so each one can have its own sound.
+async function notifyAdmin({ title, message, tags, priority }) {
   console.log(`[admin-alert] ${title}\n${message}`);
   if (!ADMIN_NTFY_TOPIC) return;
   try {
@@ -1850,7 +1856,7 @@ async function notifyAdmin({ title, message, tags }) {
       method: "POST",
       headers: {
         Title: encodeHeader(title),
-        Priority: "high", // high = plays a sound / vibrates on the phone
+        Priority: priority || "default",
         Tags: tags || "bell",
         Click: "https://business.facebook.com/latest/inbox/all"
       },
@@ -2051,6 +2057,7 @@ async function handleWhatsAppMessage(m, profileName) {
       const customer = await getCustomerName(senderId);
       await notifyAdmin({
         title: "Payment screenshot received (WhatsApp)",
+        priority: "urgent",
         message: `Customer: ${customer} sent an image (likely proof of payment). Please verify it and send the eSIM QR on WhatsApp.`,
         tags: "receipt"
       });
