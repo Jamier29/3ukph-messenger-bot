@@ -60,6 +60,13 @@
   .conv.active { border-color:var(--navy); background:#eef1fb; }
   .conv b { display:block; }
   .conv span { color:var(--muted); font-size:12px; }
+  /* Long lists scroll inside their own box so the page stays short. */
+  .scrollbox { overflow-y:auto; -webkit-overflow-scrolling:touch; overscroll-behavior:contain; border:1px solid var(--line); border-radius:10px; padding:8px; }
+  .scrollbox::-webkit-scrollbar { width:8px; } .scrollbox::-webkit-scrollbar-thumb { background:#c3c9da; border-radius:8px; }
+  #convList, #memberList { max-height:640px; }   /* about 10 customers / resellers */
+  #poList { max-height:520px; }
+  #kitPosts { max-height:560px; }                 /* scrolls once there are 2 posts */
+  #kitLib { max-height:360px; } #kitResellers { max-height:420px; }
   .thread { height:340px; overflow-y:auto; background:#f7f8fc; border:1px solid var(--line); border-radius:10px; padding:12px; display:flex; flex-direction:column; gap:6px; margin-bottom:12px; }
   .msg { max-width:78%; padding:8px 12px; border-radius:16px; font-size:14px; line-height:1.35; white-space:pre-wrap; }
   .msg.in { align-self:flex-start; background:#e9ebf1; }
@@ -109,7 +116,7 @@
         <h2>Choose a conversation</h2>
         <p class="help">Recent customers who messaged the Page (since the server last restarted). Click one to open the chat.</p>
         <div class="row" style="margin-bottom:10px"><button class="ghost" id="refreshBtn" title="Reload the list of conversations">↻ Refresh</button></div>
-        <div id="convList">Loading…</div>
+        <div id="convList" class="scrollbox">Loading…</div>
       </section>
 
       <!-- Step 3: send -->
@@ -186,7 +193,7 @@
         <button class="ghost" id="poRefresh">Refresh list</button>
       </div>
       <div class="status" id="fuStatus"></div>
-      <div id="poList" class="help">Loading…</div>
+      <div id="poList" class="help scrollbox">Loading…</div>
     </section>
 
 
@@ -201,14 +208,14 @@
         <button class="ghost" id="kitRefresh">Refresh</button>
       </div>
       <div class="status" id="kitStatus"></div>
-      <div id="kitPosts" class="help">Loading…</div>
+      <div id="kitPosts" class="help scrollbox">Loading…</div>
       <details style="margin-top:12px"><summary><b>Kit image library</b> · add your new post images here</summary>
         <p class="help">Upload a JPEG/PNG post image and describe it in a few words (e.g. "Japan winter trip, couple in snow"). It's added to every reseller's kit pool.</p>
         <div class="row"><input type="file" id="kitFile" accept="image/*" style="max-width:240px"><input type="text" id="kitTopic" placeholder="What is this image about?" style="max-width:320px"><button class="ghost" id="kitUpload">Add image</button></div>
         <div class="status" id="kitLibStatus"></div>
-        <div id="kitLib" class="help"></div>
+        <div id="kitLib" class="help scrollbox"></div>
       </details>
-      <details style="margin-top:8px"><summary><b>Resellers' kit links</b></summary><div id="kitResellers" class="help"></div></details>
+      <details style="margin-top:8px"><summary><b>Resellers' kit links</b></summary><div id="kitResellers" class="help scrollbox"></div></details>
     </section>
     <!-- ICCID lookup -->
     <section class="card">
@@ -232,7 +239,7 @@
       <div class="status" id="costsStatus"></div>
       <h2 style="margin-top:16px">Approved resellers &amp; wallets</h2>
       <p class="help">Click a reseller to see their wallet, add a top-up, or refund an order. Wallet orders are deducted automatically; orders paid by GCash/bank are logged too.</p>
-      <div id="memberList" class="help">Loading…</div>
+      <div id="memberList" class="help scrollbox">Loading…</div>
       <div class="row" style="margin-top:8px"><button class="ghost" id="allCsvBtn" title="Download every reseller's purchases for Excel">⬇ Download all purchases (CSV)</button></div>
     </section>
 
