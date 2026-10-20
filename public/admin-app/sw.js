@@ -1,6 +1,6 @@
 // 3UK Admin app service worker: makes the console installable and lets the
 // app shell open even on a weak connection. Admin data (/admin/api) is never cached.
-const CACHE = "3uk-admin-v1";
+const CACHE = "3uk-admin-v2";
 const SHELL = ["/admin/console", "/admin/app/icon-192.png", "/admin/app/icon-512.png"];
 self.addEventListener("install", (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener("activate", (e) => {

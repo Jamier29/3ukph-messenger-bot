@@ -1046,6 +1046,7 @@ app.get("/admin/api/media", requireAdmin, async (req, res) => {
 });
 
 app.get("/admin/console", (req, res) => res.sendFile(path.join(__dirname, "public", "admin.html")));
+app.get(["/admin", "/admin/"], (req, res) => res.redirect("/admin/console"));
 // Installable app (PWA) files for the Admin Console: install it on Android / Windows from the console.
 app.use("/admin/app", express.static(path.join(__dirname, "public", "admin-app"), { maxAge: "1d" }));
 app.get("/admin/sw.js", (req, res) => {

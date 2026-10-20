@@ -82,10 +82,20 @@
   <img src="/logo.png" alt="3UK Philippines logo">
   <h1>3UK Philippines Admin Console<small>Messenger &amp; WhatsApp chats, resellers and wallets</small></h1>
   <span style="margin-left:auto;display:flex;gap:8px">
-    <button class="ghost hidden" id="installBtn" title="Install the Admin Console as an app on this device" style="background:#fff">⬇ Install app</button>
+    <button class="ghost" id="installBtn" title="Install the Admin Console as an app on this device" style="background:#fff">⬇ Install app</button>
     <button class="ghost hidden" id="logoutBtn" title="Sign out on this device" style="background:#fff">Sign out</button>
   </span>
 </header>
+<div id="installHelp" class="hidden" style="background:#fff8e1;border-bottom:1px solid #f0d58a;padding:12px 20px;font-size:14px;line-height:1.5">
+  <b>How to install the Admin Console as an app</b>
+  <ul style="margin:6px 0 6px 18px;padding:0">
+    <li><b>Android (Chrome):</b> tap the <b>⋮</b> menu (top right) → <b>Add to Home screen</b> → <b>Install</b>. If you only see "Create shortcut", wait 30 seconds on this page, reload once, then try again.</li>
+    <li><b>iPhone (Safari):</b> tap the <b>Share</b> button → <b>Add to Home Screen</b> → <b>Add</b>.</li>
+    <li>If you opened this link from Messenger, Facebook or another app, open it in <b>Chrome</b> (or Safari) first: ⋮ → <b>Open in Chrome</b>. In-app browsers can't install apps.</li>
+    <li>If you installed it before and deleted it, Chrome may hide the Install option for a while; use <b>Add to Home screen</b> from the menu.</li>
+  </ul>
+  <button class="ghost" id="installHelpClose">Got it</button>
+</div>
 
 <main>
   <!-- Login -->
@@ -787,9 +797,15 @@
   // Installable app: register the service worker and offer an Install button.
   if ("serviceWorker" in navigator) { navigator.serviceWorker.register("/admin/sw.js", { scope: "/admin/" }).catch(function () {}); }
   var installEvt = null;
-  window.addEventListener("beforeinstallprompt", function (e) { e.preventDefault(); installEvt = e; $("installBtn").classList.remove("hidden"); });
-  window.addEventListener("appinstalled", function () { $("installBtn").classList.add("hidden"); });
-  $("installBtn").onclick = function () { if (!installEvt) return; installEvt.prompt(); installEvt.userChoice.then(function () { installEvt = null; $("installBtn").classList.add("hidden"); }); };
+  var standalone = (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) || window.navigator.standalone === true;
+  if (standalone) $("installBtn").classList.add("hidden");   // already running as the installed app
+  window.addEventListener("beforeinstallprompt", function (e) { e.preventDefault(); installEvt = e; });
+  window.addEventListener("appinstalled", function () { $("installBtn").classList.add("hidden"); $("installHelp").classList.add("hidden"); });
+  $("installBtn").onclick = function () {
+    if (installEvt) { installEvt.prompt(); installEvt.userChoice.then(function () { installEvt = null; }); return; }
+    $("installHelp").classList.toggle("hidden");   // browser didn't offer a prompt: show manual steps
+  };
+  $("installHelpClose").onclick = function () { $("installHelp").classList.add("hidden"); };
   $("logoutBtn").onclick = function () {
     if (!confirm("Sign out of the Admin Console on this device?")) return;
     try { localStorage.removeItem("adminKey"); sessionStorage.removeItem("adminKey"); } catch (e) {}
