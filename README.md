@@ -1,5 +1,16 @@
 # 3UKPH Messenger Bot — Setup Guide
 
+## Update (Oct 2026): Reseller Marketing Kit
+
+- Admin Console → **Marketing Kit** → **Generate post**: the Marketing AI picks one of our post images and writes a
+  caption with real retail prices (Taglish or English). Delete and generate again if you don't like it.
+- Every approved reseller gets each post **personalised**: a footer under the image and a caption line with THEIR
+  name and contact (from their reseller application), so buyers inquire with them.
+- **Send to resellers** sends it on WhatsApp to resellers who messaged in the last 24 hours (WhatsApp's rule).
+  Everyone can always open their private kit page `https://3ukph.com/kit/<code>` (links are in the console);
+  the bot also gives resellers their link when they ask for posts or marketing materials.
+- **Kit image library**: upload your new post images (with a few words about them) and they join the pool.
+
 ## Update (Oct 2026): eSIM records + live data usage
 
 - Admin Console → open a chat → **This customer's eSIMs**: save each delivered eSIM (ICCID, plan, email). Saved permanently.

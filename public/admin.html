@@ -189,6 +189,27 @@
       <div id="poList" class="help">Loading…</div>
     </section>
 
+
+    <!-- Reseller Marketing Kit -->
+    <section class="card">
+      <span class="step">Marketing Kit</span>
+      <h2>Ready-to-post content for resellers</h2>
+      <p class="help">Click <b>Generate</b>: the Marketing AI picks one of our post images and writes a caption with real prices. Every reseller gets it with <b>their own name and contact</b> on the image and caption, so buyers inquire with them. <b>Send to resellers</b> sends it on WhatsApp to resellers who messaged in the last 24 hours (WhatsApp's rule); everyone can always see all posts on their private kit link.</p>
+      <div class="row" style="margin-bottom:10px">
+        <select id="kitLang" style="max-width:160px"><option value="taglish">Taglish</option><option value="english">English</option></select>
+        <button id="kitGen">✨ Generate post</button>
+        <button class="ghost" id="kitRefresh">Refresh</button>
+      </div>
+      <div class="status" id="kitStatus"></div>
+      <div id="kitPosts" class="help">Loading…</div>
+      <details style="margin-top:12px"><summary><b>Kit image library</b> · add your new post images here</summary>
+        <p class="help">Upload a JPEG/PNG post image and describe it in a few words (e.g. "Japan winter trip, couple in snow"). It's added to every reseller's kit pool.</p>
+        <div class="row"><input type="file" id="kitFile" accept="image/*" style="max-width:240px"><input type="text" id="kitTopic" placeholder="What is this image about?" style="max-width:320px"><button class="ghost" id="kitUpload">Add image</button></div>
+        <div class="status" id="kitLibStatus"></div>
+        <div id="kitLib" class="help"></div>
+      </details>
+      <details style="margin-top:8px"><summary><b>Resellers' kit links</b></summary><div id="kitResellers" class="help"></div></details>
+    </section>
     <!-- ICCID lookup -->
     <section class="card">
       <span class="step">eSIM lookup</span>
@@ -272,7 +293,7 @@
       $("pageBox").innerHTML = (p.picture ? '<img src="' + esc(p.picture) + '" alt="">' : "") +
         '<div><b style="font-size:18px">' + esc(p.name) + '</b><br><span class="help">' + esc(p.category) + ' · Page ID ' + esc(p.id) +
         '</span><br><span class="badge ok">✓ Connected to Messenger</span></div>';
-      loadConversations(); loadPending();
+      loadConversations(); loadPending(); loadKit();
       loadResellers();
     }).catch(function (e) {
       $("loginStatus").textContent = e.message; $("loginStatus").className = "status err";
@@ -499,6 +520,77 @@
   };
   $("poRefresh").onclick = loadPending;
 
+
+  // ---- Marketing Kit ----
+  var kitData = null;
+  function kitImg(id, el) {
+    fetch("/admin/api/kit/image/" + encodeURIComponent(id), { headers: { "x-admin-key": key } })
+      .then(function (r) { if (!r.ok) throw new Error(); return r.blob(); })
+      .then(function (b) { el.src = URL.createObjectURL(b); }).catch(function () { el.alt = "Preview unavailable"; });
+  }
+  function loadKit() {
+    api("/admin/api/kit").then(function (d) {
+      kitData = d;
+      var posts = d.posts.slice(0, 8);
+      $("kitPosts").innerHTML = posts.length ? posts.map(function (p, i) {
+        return '<div style="display:flex;gap:12px;flex-wrap:wrap;border-top:1px solid var(--line);padding:12px 0">' +
+          '<img data-kit="' + esc(p.id) + '" style="width:180px;max-width:100%;border-radius:10px;border:1px solid var(--line)">' +
+          '<div style="flex:1;min-width:220px"><div style="font-size:12px;color:#4a5170">' + fmt(p.createdAt) + (p.sentAt ? " · sent " + fmt(p.sentAt) : " · not sent yet") + ' · ' + esc(p.topic) + '</div>' +
+          '<pre style="white-space:pre-wrap;font-family:inherit;font-size:13px;margin:6px 0">' + esc(p.caption) + '</pre>' +
+          '<div class="row"><button data-send="' + esc(p.id) + '">📤 Send to resellers</button><button class="ghost" data-del="' + esc(p.id) + '">Delete</button></div></div></div>';
+      }).join("") : "No posts yet. Click Generate post.";
+      Array.prototype.forEach.call(document.querySelectorAll("#kitPosts img[data-kit]"), function (im) { kitImg(im.getAttribute("data-kit"), im); });
+      Array.prototype.forEach.call(document.querySelectorAll("#kitPosts [data-send]"), function (b) { b.onclick = function () { kitSend(b.getAttribute("data-send"), b); }; });
+      Array.prototype.forEach.call(document.querySelectorAll("#kitPosts [data-del]"), function (b) { b.onclick = function () {
+        api("/admin/api/kit/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: b.getAttribute("data-del") }) }).then(loadKit); }; });
+      $("kitLib").innerHTML = '<table class="ledger"><tr><th>Image</th><th>About</th><th></th></tr>' + d.library.map(function (x) {
+        return "<tr><td>" + (x.uploaded ? "Uploaded" : "Built-in") + "</td><td>" + esc(x.topic) + "</td><td>" + (x.uploaded ? '<button class="ghost" data-rm="' + esc(x.id) + '">Remove</button>' : "") + "</td></tr>";
+      }).join("") + "</table>";
+      Array.prototype.forEach.call(document.querySelectorAll("#kitLib [data-rm]"), function (b) { b.onclick = function () {
+        api("/admin/api/kit/library", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ remove: b.getAttribute("data-rm") }) }).then(loadKit); }; });
+      $("kitResellers").innerHTML = d.resellers.length ? '<table class="ledger"><tr><th>Reseller</th><th>Kit link</th><th>WhatsApp now?</th></tr>' + d.resellers.map(function (r, i) {
+        return "<tr><td><b>" + esc(r.name) + "</b><br><span>" + esc(r.contact || "no contact saved") + " · " + esc(r.tier) + "</span></td><td><a href=\"" + esc(r.link) + "\" target=\"_blank\">" + esc(r.link) + '</a><br><button class="ghost" data-copy="' + i + '">Copy link</button></td><td>' + (r.canSendNow ? "✅ yes" : "Send the link manually") + "</td></tr>";
+      }).join("") + "</table>" : "No approved resellers yet.";
+      Array.prototype.forEach.call(document.querySelectorAll("#kitResellers [data-copy]"), function (b) { b.onclick = function () {
+        var link = d.resellers[+b.getAttribute("data-copy")].link;
+        (navigator.clipboard ? navigator.clipboard.writeText(link) : Promise.reject()).then(function () { b.textContent = "Copied ✓"; }, function () { prompt("Copy this link:", link); }); }; });
+    }).catch(function (e) { $("kitPosts").textContent = "Couldn't load: " + e.message; });
+  }
+  function kitSend(id, btn) {
+    btn.disabled = true; $("kitStatus").className = "status"; $("kitStatus").textContent = "Sending…";
+    api("/admin/api/kit/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: id }) }).then(function (r) {
+      var msg = "✓ Sent on WhatsApp to " + r.sent.length + " reseller(s)" + (r.sent.length ? ": " + r.sent.join(", ") : "") + ".";
+      var later = r.skipped.concat(r.failed);
+      if (later.length) msg += " Not sent to " + later.length + " (outside WhatsApp's 24-hour window or Messenger): they can see it on their kit link. Copy their links under \"Resellers' kit links\".";
+      $("kitStatus").className = "status ok"; $("kitStatus").textContent = msg; loadKit();
+    }).catch(function (e) { $("kitStatus").className = "status err"; $("kitStatus").textContent = e.message; }).then(function () { btn.disabled = false; });
+  }
+  $("kitGen").onclick = function () {
+    $("kitGen").disabled = true; $("kitStatus").className = "status"; $("kitStatus").textContent = "✨ Marketing AI is writing a post…";
+    api("/admin/api/kit/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ language: $("kitLang").value }) })
+      .then(function () { $("kitStatus").className = "status ok"; $("kitStatus").textContent = "✓ New post ready. Check it below, then Send to resellers (or Delete and generate again)."; loadKit(); })
+      .catch(function (e) { $("kitStatus").className = "status err"; $("kitStatus").textContent = e.message; })
+      .then(function () { $("kitGen").disabled = false; });
+  };
+  $("kitRefresh").onclick = loadKit;
+  $("kitUpload").onclick = function () {
+    var f = $("kitFile").files[0];
+    if (!f) { $("kitLibStatus").className = "status err"; $("kitLibStatus").textContent = "Choose an image first."; return; }
+    var rd = new FileReader();
+    rd.onload = function () {
+      var img = new Image();
+      img.onload = function () {
+        var scale = Math.min(1, 1200 / Math.max(img.width, img.height));
+        var c = document.createElement("canvas"); c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        api("/admin/api/kit/library", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dataUrl: c.toDataURL("image/jpeg", 0.85), topic: $("kitTopic").value }) })
+          .then(function () { $("kitLibStatus").className = "status ok"; $("kitLibStatus").textContent = "✓ Added to the kit library."; $("kitFile").value = ""; $("kitTopic").value = ""; loadKit(); })
+          .catch(function (e) { $("kitLibStatus").className = "status err"; $("kitLibStatus").textContent = e.message; });
+      };
+      img.src = rd.result;
+    };
+    rd.readAsDataURL(f);
+  };
   // ---- 1-tap delivery ----
   var dlv = null;
   function dlvLoad(planId, keepStatus) {

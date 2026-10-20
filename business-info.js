@@ -109,7 +109,8 @@ Anyone can apply to resell our eSIMs (great for seafarers, OFWs, travel agents, 
 - Gold Reseller: loads a prepaid wallet of ₱5,000 or more (unused balance is refundable). Gets an even lower
   price and priority orders; orders are deducted from the wallet.
 - We deliver the eSIM QR under the 3UK Philippines brand within about 5 minutes after payment; the reseller
-  forwards it to their customer. We also share ready-made posts and images they can use.
+  forwards it to their customer. Approved resellers get a personal Marketing Kit link with ready-to-post images and
+  captions that already carry THEIR name and contact, so buyers inquire with them; new posts are added regularly.
 - Gold resellers can ask their wallet balance and recent purchases anytime (use check_wallet). To top up,
   they pay by GCash/Maya/bank and send the screenshot; the admin adds it to their wallet.
 - Rule: resellers may set any price in their own circles, but should not post prices LOWER than our retail

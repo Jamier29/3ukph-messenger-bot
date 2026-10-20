@@ -11,9 +11,11 @@
     "node": ">=18"
   },
   "dependencies": {
+    "@resvg/resvg-js": "^2.6.2",
     "dotenv": "^16.4.5",
     "exceljs": "^4.4.0",
     "express": "^4.19.2",
+    "jpeg-js": "^0.4.4",
     "pngjs": "^7.0.0",
     "qrcode": "^1.5.4"
   }

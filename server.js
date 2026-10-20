@@ -19,11 +19,13 @@ const { startPriceSync, syncPrices, getSyncStatus } = require("./priceSync");
 const crypto = require("crypto");
 const ExcelJS = require("exceljs");
 const reseller = require("./reseller");
+const kit = require("./marketingKit");
 const esims = require("./esimcard");
 
 const app = express();
 // Admin image uploads (QR codes) are bigger than normal requests.
 app.use("/admin/api/send-image", express.json({ limit: "12mb" }));
+app.use("/admin/api/kit/library", express.json({ limit: "4mb" }));
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
@@ -237,6 +239,7 @@ async function checkDiscountDb() {
 }
 // Reseller program data (private costs + approved resellers) also lives in Upstash.
 reseller.init(UPSTASH_URL && UPSTASH_TOKEN ? redis : null);
+kit.init({ redis: UPSTASH_URL && UPSTASH_TOKEN ? redis : null, callClaude: (sys, user, max) => callClaudeText(sys, user, max, 0.9), findPlans: (q, n) => findPlansByText(q, n) });
 esims.init(UPSTASH_URL && UPSTASH_TOKEN ? redis : null);
 
 if (UPSTASH_URL && UPSTASH_TOKEN) {
@@ -911,11 +914,11 @@ const customerLang = new Map(); // psid -> last non-English language the custome
 // English or Filipino/Taglish, returns { language, english }. Otherwise null.
 // ---------------------------------------------------------------------
 const translateCache = new Map();
-async function callClaudeText(system, user, maxTokens) {
+async function callClaudeText(system, user, maxTokens, temperature) {
   const r = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
-    body: JSON.stringify({ model: CLAUDE_MODEL, max_tokens: maxTokens || 800, temperature: 0, system, messages: [{ role: "user", content: user }] })
+    body: JSON.stringify({ model: CLAUDE_MODEL, max_tokens: maxTokens || 800, temperature: temperature || 0, system, messages: [{ role: "user", content: user }] })
   });
   if (!r.ok) throw new Error(`Claude API ${r.status}`);
   const d = await r.json();
@@ -1379,6 +1382,136 @@ app.post("/admin/api/followup-settings", requireAdmin, async (req, res) => {
   res.json(st);
 });
 // Pending orders: customers who ordered in the last 7 days and haven't been delivered yet.
+// ---------------------------------------------------------------------
+// Reseller Marketing Kit (see marketingKit.js)
+// ---------------------------------------------------------------------
+const KIT_BASE = PUBLIC_URL || "https://3ukph.com";
+async function kitLink(psid) { return `${KIT_BASE}/kit/${await kit.tokenFor(psid)}`; }
+function lastCustomerTime(psid) {
+  const m = [...(chatLog.get(psid) || [])].reverse().find((x) => !x.fromPage);
+  return m ? Date.parse(m.time) : 0;
+}
+async function kitResellers() {
+  const members = await reseller.listMembers().catch(() => []);
+  const now = Date.now();
+  return Promise.all(members.map(async (m) => {
+    const last = lastCustomerTime(m.psid);
+    const lbl = kit.resellerLabel(m, m.psid);
+    return { psid: m.psid, tier: m.tier, name: lbl.name, contact: lbl.contact, channel: isWa(m.psid) ? "WhatsApp" : "Messenger",
+      link: await kitLink(m.psid), lastMessageAt: last ? new Date(last).toISOString() : null,
+      canSendNow: isWa(m.psid) && last > 0 && now - last < 23 * 3600000 };
+  }));
+}
+app.get("/admin/api/kit", requireAdmin, async (req, res) => {
+  try {
+    const [posts, lib, resellers] = await Promise.all([kit.listPosts(), kit.libraryItems(), kitResellers()]);
+    res.json({ posts, library: lib.map((x) => ({ id: x.id, topic: x.topic, uploaded: !!x.uploaded })), resellers });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post("/admin/api/kit/generate", requireAdmin, async (req, res) => {
+  try { res.json({ post: await kit.generatePost({ language: req.body && req.body.language, imageId: req.body && req.body.imageId }) }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post("/admin/api/kit/delete", requireAdmin, async (req, res) => {
+  await kit.deletePost(String((req.body && req.body.id) || "")); res.json({ ok: true });
+});
+app.post("/admin/api/kit/library", requireAdmin, async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (b.remove) { await kit.removeLibraryImage(String(b.remove)); return res.json({ ok: true }); }
+    const m = /^data:image\/(jpeg|jpg);base64,(.+)$/i.exec(String(b.dataUrl || ""));
+    if (!m) return res.status(400).json({ error: "Please upload a JPEG image." });
+    res.json({ id: await kit.addLibraryImage(Buffer.from(m[2], "base64"), b.topic) });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+// Preview image for the console (sample reseller name), or the real one with ?psid=.
+app.get("/admin/api/kit/image/:id", requireAdmin, async (req, res) => {
+  try {
+    const post = await kit.getPost(req.params.id);
+    if (!post) return res.status(404).json({ error: "Post not found." });
+    const psid = String(req.query.psid || "");
+    const member = psid ? await reseller.getMember(psid).catch(() => null) : { name: "Reseller Name", contact: "0917 000 0000" };
+    res.type("image/jpeg").send(await kit.personalImage(post, member, psid));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Sends a post to every reseller WhatsApp allows right now (inside the 24-hour window).
+async function kitSendTo(psid, post) {
+  const member = await reseller.getMember(psid);
+  const img = await kit.personalImage(post, member, psid);
+  const caption = kit.personalCaption(post, member, psid);
+  const intro = `📣 New ready-to-post for you! Post it on your Facebook, Instagram or TikTok. Your name and contact are already on it.\nAll your posts: ${await kitLink(psid)}`;
+  const fd = new FormData();
+  fd.append("messaging_product", "whatsapp"); fd.append("type", "image/jpeg");
+  fd.append("file", new Blob([img], { type: "image/jpeg" }), "post.jpg");
+  const up = await fetch(`https://graph.facebook.com/v21.0/${WA_PHONE_NUMBER_ID}/media`, { method: "POST", headers: { Authorization: `Bearer ${WA_TOKEN}` }, body: fd });
+  const ud = await up.json().catch(() => ({}));
+  if (!up.ok || !ud.id) throw new Error((ud.error && ud.error.message) || "image upload failed");
+  if (!(await waSend(psid, { type: "text", text: { body: intro, preview_url: false } }))) throw new Error("WhatsApp refused the message");
+  await waSend(psid, { type: "image", image: { id: ud.id } });
+  await waSend(psid, { type: "text", text: { body: caption.slice(0, 4000), preview_url: false } });
+  const key = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  await storeSentImage(key, "image/jpeg", img);
+  recordChat(psid, true, "(marketing kit post) " + caption, "admin", { media: { src: "wa", id: ud.id, mime: "image/jpeg", key } });
+}
+app.post("/admin/api/kit/send", requireAdmin, async (req, res) => {
+  const post = await kit.getPost(String((req.body && req.body.id) || ""));
+  if (!post) return res.status(404).json({ error: "Post not found." });
+  const list = await kitResellers();
+  const sent = [], skipped = [], failed = [];
+  for (const r of list) {
+    if (!r.canSendNow) { skipped.push({ name: r.name, link: r.link, reason: r.channel === "WhatsApp" ? "No message from them in the last 24 hours" : "Messenger reseller" }); continue; }
+    try { await kitSendTo(r.psid, post); sent.push(r.name); }
+    catch (e) { failed.push({ name: r.name, link: r.link, reason: e.message }); }
+  }
+  await kit.markSent(post.id);
+  res.json({ sent, skipped, failed });
+});
+
+// Public kit page for one reseller.
+app.get("/kit/:token", async (req, res) => {
+  const psid = await kit.psidForToken(req.params.token);
+  const member = psid ? await reseller.getMember(psid).catch(() => null) : null;
+  res.set("X-Robots-Tag", "noindex");
+  if (!member) return res.status(404).type("html").send('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><body style="font-family:Arial,sans-serif;padding:32px;text-align:center"><h2>This kit link isn\'t active</h2><p>Message 3UK Philippines to get your reseller marketing kit.</p></body>');
+  const posts = (await kit.listPosts()).slice(0, 20);
+  const lbl = kit.resellerLabel(member, psid);
+  const t = encodeURIComponent(req.params.token);
+  const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const cards = posts.map((p, i) => {
+    const cap = kit.personalCaption(p, member, psid);
+    return `<article class="card"><img src="/kit/${t}/img/${encodeURIComponent(p.id)}.jpg" alt="Post ${i + 1}" loading="lazy">
+      <pre id="c${i}">${esc(cap)}</pre>
+      <div class="btns"><button onclick="cp(${i},this)">Copy caption</button><a class="dl" href="/kit/${t}/img/${encodeURIComponent(p.id)}.jpg?download=1" download="3UK-post-${i + 1}.jpg">Download image</a></div></article>`;
+  }).join("") || '<p class="empty">No posts yet. New ones will appear here soon!</p>';
+  res.type("html").send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">
+<title>My 3UK Marketing Kit</title><link rel="icon" href="/favicon.png">
+<style>:root{--navy:#00166a;--blue:#012ca5;--gold:#f8c830;--bg:#f3f5fb}*{box-sizing:border-box}body{margin:0;font-family:Montserrat,Arial,sans-serif;background:var(--bg);color:#0b1233}
+header{background:linear-gradient(135deg,var(--navy),var(--blue));color:#fff;padding:24px 16px 28px;text-align:center}header img{width:64px;height:64px;border-radius:50%;background:#fff}
+h1{margin:10px 0 4px;font-size:22px}header p{margin:0;color:#d6dcf5;font-size:14px}.wrap{max-width:560px;margin:0 auto;padding:16px}
+.tips{background:#fff;border-radius:14px;padding:14px 16px;font-size:14px;line-height:1.5;margin-bottom:16px;border-left:6px solid var(--gold)}
+.card{background:#fff;border-radius:16px;overflow:hidden;margin-bottom:18px;box-shadow:0 4px 14px rgba(0,22,106,.1)}.card img{width:100%;display:block}
+pre{white-space:pre-wrap;font-family:inherit;font-size:14px;line-height:1.5;margin:0;padding:14px 16px;border-bottom:1px solid #e3e7f3}
+.btns{display:flex;gap:10px;padding:12px 16px}.btns button,.btns a{flex:1;text-align:center;border:0;border-radius:10px;padding:12px;font-weight:700;font-size:14px;cursor:pointer;text-decoration:none;font-family:inherit}
+.btns button{background:var(--blue);color:#fff}.btns a{background:var(--gold);color:var(--navy)}.empty{text-align:center;color:#4a5170}footer{text-align:center;font-size:12px;color:#4a5170;padding:10px 16px 30px}</style></head>
+<body><header><img src="/logo.png" alt="3UK Philippines"><h1>Hi ${esc(lbl.name.split(" ")[0])}! Your Marketing Kit</h1><p>Ready-to-post images and captions with your name and contact.</p></header>
+<div class="wrap"><div class="tips"><b>How to use:</b> 1) Download the image. 2) Copy the caption. 3) Post on Facebook, Instagram or TikTok. Buyers will message you, then order from us as usual. New posts are added here regularly, so bookmark this page.</div>${cards}</div>
+<footer>3UK Philippines · DTI &amp; BIR registered · Taguig City · Keep this link private: it shows your contact details.</footer>
+<script>function cp(i,b){var t=document.getElementById("c"+i).innerText;function ok(){b.textContent="Copied ✓";setTimeout(function(){b.textContent="Copy caption"},1800)}
+if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).then(ok,function(){fb()})}else fb();
+function fb(){var r=document.createRange();r.selectNodeContents(document.getElementById("c"+i));var s=getSelection();s.removeAllRanges();s.addRange(r);try{document.execCommand("copy");ok()}catch(e){b.textContent="Select & copy"}}}</script></body></html>`);
+});
+app.get("/kit/:token/img/:id.jpg", async (req, res) => {
+  try {
+    const psid = await kit.psidForToken(req.params.token);
+    const member = psid ? await reseller.getMember(psid).catch(() => null) : null;
+    const post = member ? await kit.getPost(req.params.id) : null;
+    if (!post) return res.status(404).send("Not found");
+    res.set("Cache-Control", "private, max-age=3600");
+    if (req.query.download) res.set("Content-Disposition", `attachment; filename="3UK-post-${post.id}.jpg"`);
+    res.type("image/jpeg").send(await kit.personalImage(post, member, psid));
+  } catch (e) { res.status(500).send("Error"); }
+});
+
 app.get("/admin/api/pending-orders", requireAdmin, async (req, res) => {
   const now = Date.now();
   const rows = [];
@@ -1725,6 +1858,7 @@ async function appendNote(senderId, note) {
 async function getClaudeReply(senderId, userText) {
   await loadHistory(senderId);
   const member = await getResellerSafe(senderId);
+  const kitUrl = member ? await kitLink(senderId).catch(() => null) : null;
   const resellerContext = member
     ? `\n\n--- THIS CHAT ---\nThe person you are chatting with is an APPROVED ${member.tier === "gold" ? "GOLD" : "STARTER"} RESELLER` +
       `${member.name ? `; their name is ${member.name}, so address them by that name` : ""}. In search and get_plan results for this person, "price" IS their reseller price (what they pay us), ` +
@@ -1734,6 +1868,8 @@ async function getClaudeReply(senderId, userText) {
       `that was pending); if a plan was quoted earlier, call get_plan again to get the reseller price before ordering.` + (member.tier === "gold" ? ` As a Gold reseller they can pay with paymentMethod "Wallet" (deducted from their prepaid wallet). Never refuse a Wallet payment yourself -- ` +
         `call create_order with paymentMethod "Wallet"; it checks the balance and tells you if it's too low.` : "")
     : "\n\n--- THIS CHAT ---\nThis person is NOT an approved reseller. Never quote reseller prices or reseller discounts to them.";
+  const kitContext = kitUrl ? `\nTheir personal MARKETING KIT (ready-to-post images and captions that already show their own name and contact): ${kitUrl} . ` +
+    `Share this link when they ask for posts, images, captions, marketing materials or how to promote. Tell them to keep it private because it shows their contact details.` : "";
   // Warm welcome-back greeting on the first message of a new visit.
   let greetingContext = "";
   const lastSeen = await getAndSetLastSeen(senderId);
@@ -1764,7 +1900,7 @@ async function getClaudeReply(senderId, userText) {
     "say so plainly. Write plain text only (no asterisks or markdown). This is a private one-to-one chat: " +
     "EVERY customer message in it comes from the same single person, so never say you are busy with or helping " +
     "someone else. Names mentioned in the chat (e.g. on a reseller application) belong to this person unless they " +
-    "clearly say the eSIM is for someone else.\n\n" + BUSINESS_INFO + resellerContext + greetingContext;
+    "clearly say the eSIM is for someone else.\n\n" + BUSINESS_INFO + resellerContext + kitContext + greetingContext;
 
   const messages = getHistory(senderId).slice();
   messages.push({ role: "user", content: userText });
