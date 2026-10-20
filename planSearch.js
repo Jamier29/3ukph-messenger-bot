@@ -75,7 +75,24 @@ function resolveDestination(query) {
   const exactIdx = DESTINATIONS_LOWER.indexOf(q);
   if (exactIdx !== -1) return [DESTINATIONS[exactIdx]];
 
-  return DESTINATIONS.filter((d, i) => DESTINATIONS_LOWER[i].includes(q) || q.includes(DESTINATIONS_LOWER[i]));
+  const partial = DESTINATIONS.filter((d, i) => DESTINATIONS_LOWER[i].includes(q) || q.includes(DESTINATIONS_LOWER[i]));
+  if (partial.length) return partial;
+  // Typo tolerance: "Iram" -> Iran, "Phillipines" -> Philippines.
+  const close = closeDestinations(q, q.length <= 5 ? 1 : 2);
+  return close.length === 1 ? close : [];
+}
+
+function editDistance(a, b) {
+  const dp = Array.from({ length: a.length + 1 }, (_, i) => [i]);
+  for (let j = 1; j <= b.length; j++) dp[0][j] = j;
+  for (let i = 1; i <= a.length; i++)
+    for (let j = 1; j <= b.length; j++)
+      dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return dp[a.length][b.length];
+}
+function closeDestinations(q, maxDist) {
+  if (!q || q.length < 3) return [];
+  return DESTINATIONS.filter((d, i) => editDistance(q, DESTINATIONS_LOWER[i]) <= maxDist);
 }
 
 // Rough numeric GB value for sorting/filtering ("20GB" -> 20, "500MB" -> 0.5, "Unlimited" -> Infinity).
@@ -133,7 +150,12 @@ function searchPlans({ destination, minDataGB, minDays, maxDays, needsCallsAndTe
   const resolvedNames = resolveDestination(destination);
 
   if (resolvedNames.length === 0) {
-    return { found: false, matchedDestinations: [], plans: [] };
+    const q = String(destination || "").trim().toLowerCase();
+    return {
+      found: false, matchedDestinations: [], plans: [],
+      didYouMean: closeDestinations(q, 3).sort((a, b) => editDistance(q, a.toLowerCase()) - editDistance(q, b.toLowerCase())).slice(0, 5),
+      note: "No exact match. Check the spelling / didYouMean, try the country name in English, or offer a regional/global plan. Do not tell the customer we don't cover it until you have tried."
+    };
   }
 
   const resolvedSet = new Set(resolvedNames.map((n) => n.toLowerCase()));
