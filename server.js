@@ -12,7 +12,7 @@ const fs = require("fs");
 const path = require("path");
 const express = require("express");
 const { BUSINESS_INFO } = require("./business-info");
-const { findPlansByText, getRawPlan, searchPlans, getPlan, listAllDestinations, getRate, headlinePrices, regionSummaries, formatPHP } = require("./planSearch");
+const { searchMultiCountryPlans, findPlansByText, getRawPlan, searchPlans, getPlan, listAllDestinations, getRate, headlinePrices, regionSummaries, formatPHP } = require("./planSearch");
 const QRCode = require("qrcode");
 const { brandedQr } = require("./qrcard");
 const { startPriceSync, syncPrices, getSyncStatus } = require("./priceSync");
@@ -312,6 +312,24 @@ const TOOLS = [
     }
   },
   {
+    name: "search_multi_country_plans",
+    description:
+      "Use this whenever the customer will visit TWO OR MORE countries on one trip (e.g. 'Austria and Germany', " +
+      "'Japan then Korea', 'Spain, France, Italy'). Returns regional/global plans that cover ALL of those countries " +
+      "with one eSIM. Always call this before suggesting separate single-country eSIMs.",
+    input_schema: {
+      type: "object",
+      properties: {
+        countries: { type: "array", items: { type: "string" }, description: "Every country the customer mentioned, e.g. ['Austria','Germany']." },
+        minDataGB: { type: "number", description: "Only plans with at least this many GB." },
+        minDays: { type: "number", description: "Only plans valid for at least this many days." },
+        maxDays: { type: "number", description: "Only plans valid for at most this many days." },
+        needsCallsAndTexts: { type: "boolean", description: "true = only plans that include calls & texts." }
+      },
+      required: ["countries"]
+    }
+  },
+  {
     name: "get_plan",
     description:
       "Get the exact details and peso price of ONE plan by its planId. Use this whenever the customer picks " +
@@ -397,6 +415,13 @@ async function runTool(name, input, senderId) {
   switch (name) {
     case "search_esim_plans": {
       const result = searchPlans(input || {});
+      const member = await getResellerSafe(senderId);
+      if (member && Array.isArray(result.plans)) result.plans = result.plans.map((p) => addResellerPrice(p, member));
+      return result;
+    }
+
+    case "search_multi_country_plans": {
+      const result = searchMultiCountryPlans(input || {});
       const member = await getResellerSafe(senderId);
       if (member && Array.isArray(result.plans)) result.plans = result.plans.map((p) => addResellerPrice(p, member));
       return result;

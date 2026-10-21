@@ -189,6 +189,48 @@ function searchPlans({ destination, minDataGB, minDays, maxDays, needsCallsAndTe
   };
 }
 
+/**
+ * Trip to several countries (e.g. Austria + Germany): find regional/global
+ * plans whose coverage includes ALL of them, so the customer needs ONE eSIM.
+ * Regional plans come before global ones (usually cheaper).
+ */
+function searchMultiCountryPlans({ countries, minDataGB, minDays, maxDays, needsCallsAndTexts, maxResults } = {}) {
+  const list = (Array.isArray(countries) ? countries : String(countries || "").split(/,|\band\b|&|\+/i))
+    .map((c) => String(c).trim()).filter(Boolean);
+  if (list.length < 2) return { found: false, note: "Give at least two countries. For one country use search_esim_plans." };
+  const resolved = [], unknown = [];
+  for (const c of list) {
+    const r = resolveDestination(c).filter((d) => PLANS.some((p) => p.scope === "country" && p.destination === d));
+    if (r.length) resolved.push(r[0]); else unknown.push(c);
+  }
+  const want = resolved.map((c) => c.toLowerCase());
+  const covers = (p) => Array.isArray(p.countries) && want.every((w) => p.countries.some((c) => c.toLowerCase() === w));
+  let matches = PLANS.filter((p) => p.scope !== "country" && covers(p));
+  if (typeof minDataGB === "number") matches = matches.filter((p) => dataToNumber(p.data) >= minDataGB);
+  if (typeof minDays === "number") matches = matches.filter((p) => (p.validityDays || 0) >= minDays);
+  if (typeof maxDays === "number") matches = matches.filter((p) => (p.validityDays || 0) <= maxDays);
+  if (needsCallsAndTexts === true) matches = matches.filter((p) => p.voiceSms);
+  const rank = (p) => (p.scope === "regional" ? 0 : 1);
+  matches.sort((a, b) => rank(a) - rank(b) || dataToNumber(a.data) - dataToNumber(b.data) ||
+    (a.validityDays || 0) - (b.validityDays || 0) || (a.retailPrice || 0) - (b.retailPrice || 0));
+  const limit = Math.min(Math.max(maxResults || 20, 1), 60);
+  const regions = [...new Set(matches.map((p) => `${p.destination} (${p.countries.length} countries)`))];
+  const plans = matches.slice(0, limit).map((p) => { const d = describePlan(p); delete d.countriesCovered; return d; });
+  return {
+    found: plans.length > 0,
+    countriesRequested: resolved,
+    notRecognised: unknown.length ? unknown : undefined,
+    plansThatCoverAllOfThem: regions,
+    totalMatching: matches.length,
+    plans,
+    instructionsForYou: plans.length
+      ? "Recommend ONE of these multi-country plans first (one eSIM for the whole trip, no switching). " +
+        "Only mention separate single-country eSIMs if the customer asks, or if they are clearly cheaper for a very short stop."
+      : "No single regional/global plan covers all these countries" + (unknown.length ? ` (couldn't recognise: ${unknown.join(", ")})` : "") +
+        ". Offer the best plan per country with search_esim_plans, or ask the customer to confirm the countries."
+  };
+}
+
 function getPlan(planId) {
   const p = PLANS_BY_ID.get(String(planId || "").trim().toUpperCase());
   return p ? describePlan(p) : null;
@@ -284,4 +326,4 @@ function findPlansByText(q, limit = 15) {
   return out;
 }
 
-module.exports = { findPlansByText, getRawPlan, regionSummaries, searchPlans, getPlan, listAllDestinations, getRate, getCatalogInfo, headlinePrices, setCatalog, formatPHP, toPHP };
+module.exports = { searchMultiCountryPlans, findPlansByText, getRawPlan, regionSummaries, searchPlans, getPlan, listAllDestinations, getRate, getCatalogInfo, headlinePrices, setCatalog, formatPHP, toPHP };
