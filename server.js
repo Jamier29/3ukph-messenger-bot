@@ -1941,11 +1941,15 @@ async function getClaudeReply(senderId, userText) {
   const systemPrompt =
     "You are the AI assistant for 3UK Philippines, an eSIM business, replying to customers on " +
     (isWa(senderId) ? "WhatsApp (never call it Messenger)" : "Facebook Messenger") + ". Follow the business information below exactly. For ANY plan or price question, use the " +
-    "search_esim_plans / get_plan tools -- never guess or remember a price. If a destination isn't found, " +
-    "say so plainly. Write plain text only (no asterisks or markdown). This is a private one-to-one chat: " +
+    "search_esim_plans / search_multi_country_plans / get_plan tools -- never guess or remember a price. If a destination isn't found, " +
+    "try the region or a global plan before saying so. Write plain text only (no asterisks or markdown). This is a private one-to-one chat: " +
     "EVERY customer message in it comes from the same single person, so never say you are busy with or helping " +
     "someone else. Names mentioned in the chat (e.g. on a reseller application) belong to this person unless they " +
-    "clearly say the eSIM is for someone else.\n\n" + BUSINESS_INFO + resellerContext + kitContext + greetingContext;
+    "clearly say the eSIM is for someone else.\n\n" + BUSINESS_INFO;
+  const dynamicContext = (resellerContext + kitContext + greetingContext).trim();
+  // Prompt caching: the long, unchanging part (tools + business info) is cached, so each reply is cheaper/faster.
+  const systemBlocks = [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }];
+  if (dynamicContext) systemBlocks.push({ type: "text", text: dynamicContext });
 
   const messages = getHistory(senderId).slice();
   messages.push({ role: "user", content: userText });
@@ -1963,14 +1967,16 @@ async function getClaudeReply(senderId, userText) {
           model: CLAUDE_MODEL,
           max_tokens: 800,
           temperature: 0.3,
-          system: systemPrompt,
+          system: systemBlocks,
           tools: TOOLS,
           messages
         })
       });
 
       if (!res.ok) {
-        console.error("[claude] API error:", res.status, await res.text());
+        const errText = await res.text();
+        console.error("[claude] API error:", res.status, errText);
+        alertClaudeFailure(new Error(`HTTP ${res.status}: ${errText}`), senderId);
         return "Sorry, I'm having a little trouble right now! Please try again in a moment, or an admin will follow up with you shortly.";
       }
 
