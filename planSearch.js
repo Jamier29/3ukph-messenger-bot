@@ -326,4 +326,6 @@ function findPlansByText(q, limit = 15) {
   return out;
 }
 
-module.exports = { searchMultiCountryPlans, findPlansByText, getRawPlan, regionSummaries, searchPlans, getPlan, listAllDestinations, getRate, getCatalogInfo, headlinePrices, setCatalog, formatPHP, toPHP };
+function countryNames() { return [...new Set(PLANS.filter((p) => p.scope === "country").map((p) => p.destination))]; }
+
+module.exports = { countryNames, searchMultiCountryPlans, findPlansByText, getRawPlan, regionSummaries, searchPlans, getPlan, listAllDestinations, getRate, getCatalogInfo, headlinePrices, setCatalog, formatPHP, toPHP };

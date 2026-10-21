@@ -20,6 +20,7 @@ const crypto = require("crypto");
 const ExcelJS = require("exceljs");
 const reseller = require("./reseller");
 const kit = require("./marketingKit");
+const { tripContext } = require("./tripAdvisor");
 const esims = require("./esimcard");
 
 const app = express();
@@ -1946,7 +1947,11 @@ async function getClaudeReply(senderId, userText) {
     "EVERY customer message in it comes from the same single person, so never say you are busy with or helping " +
     "someone else. Names mentioned in the chat (e.g. on a reseller application) belong to this person unless they " +
     "clearly say the eSIM is for someone else.\n\n" + BUSINESS_INFO;
-  const dynamicContext = (resellerContext + kitContext + greetingContext).trim();
+  // Travel brain: work out the trip from the customer's recent messages and pre-pick the right plan.
+  const recentUserTexts = getHistory(senderId).filter((m) => m.role === "user" && typeof m.content === "string")
+    .slice(-8).map((m) => m.content).concat([userText]);
+  const tripHint = tripContext(recentUserTexts);
+  const dynamicContext = (resellerContext + kitContext + greetingContext + (tripHint ? "\n" + tripHint : "")).trim();
   // Prompt caching: the long, unchanging part (tools + business info) is cached, so each reply is cheaper/faster.
   const systemBlocks = [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }];
   if (dynamicContext) systemBlocks.push({ type: "text", text: dynamicContext });
