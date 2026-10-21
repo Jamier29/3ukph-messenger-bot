@@ -1856,6 +1856,25 @@ async function appendNote(senderId, note) {
 // ---------------------------------------------------------------------
 // Ask Claude for a reply, with a short tool-use loop.
 // ---------------------------------------------------------------------
+// Tell the owner (ntfy, urgent) when the AI can't answer -- e.g. Claude API credits ran out.
+// At most one alert every 30 minutes so a busy day doesn't spam the phone.
+let lastClaudeAlertAt = 0;
+function alertClaudeFailure(err, senderId) {
+  const now = Date.now();
+  if (now - lastClaudeAlertAt < 30 * 60 * 1000) return;
+  lastClaudeAlertAt = now;
+  const msg = String((err && err.message) || err || "");
+  const credits = /credit|balance|billing|402/i.test(msg);
+  notifyAdmin({
+    title: credits ? "AI bot stopped: Claude credits ran out" : "AI bot can't reply right now",
+    message: (credits
+      ? "Customers are getting an error reply. Top up at console.anthropic.com > Billing. "
+      : "Customers are getting an error reply. ") + `Last chat: ${senderId}. Error: ${msg.slice(0, 200)}`,
+    tags: "rotating_light",
+    priority: "urgent"
+  }).catch(() => {});
+}
+
 async function getClaudeReply(senderId, userText) {
   await loadHistory(senderId);
   const member = await getResellerSafe(senderId);
@@ -1962,6 +1981,7 @@ async function getClaudeReply(senderId, userText) {
     return fallback;
   } catch (err) {
     console.error("[claude] Request failed:", err);
+    alertClaudeFailure(err, senderId);
     return "Sorry, I'm having a little trouble right now! Please try again in a moment, or an admin will follow up with you shortly.";
   }
 }
