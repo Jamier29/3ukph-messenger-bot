@@ -600,7 +600,7 @@ async function runTool(name, input, senderId) {
 
       // PayMongo: a secure checkout link for the exact amount. Paid -> confirmed automatically
       // (webhook + backup check) -> eSIM bought and sent automatically. Falls back to our QR images.
-      if (pm.configured() && PUBLIC_URL && ["gcash", "maya", "maribank", "unionbank", "bpi", "qrph", "card"].includes(methodKey)) {
+      if (pm.configured() && PUBLIC_URL && pmAllowedFor(senderId) && ["gcash", "maya", "maribank", "unionbank", "bpi", "qrph", "card"].includes(methodKey)) {
         try {
           const ref = "3UK-" + Date.now().toString(36).toUpperCase();
           const planLabel = `${plan.name} (${plan.destination}, ${plan.data}, ${plan.validityDays} days${plan.callsAndTexts ? ", with calls & texts" : ""})`;
@@ -1405,6 +1405,15 @@ app.post("/admin/api/deliver", requireAdmin, async (req, res) => {
   }
 });
 
+// While testing (sk_test_ key) only these WhatsApp numbers get PayMongo links, so real customers
+// keep the normal payment flow. PAYMONGO_TEST_NUMBERS = comma list (default: the owner's number).
+const PAYMONGO_TEST_NUMBERS = String(process.env.PAYMONGO_TEST_NUMBERS || "639672130757").split(",").map((x) => x.replace(/\D/g, "")).filter(Boolean);
+function pmAllowedFor(senderId) {
+  if (!pm.isTest()) return true;
+  const digits = String(senderId).replace(/\D/g, "");
+  return PAYMONGO_TEST_NUMBERS.some((n) => n && digits.endsWith(n));
+}
+
 // ---- PayMongo: automatic payment confirmation + automatic delivery ----
 // pm:order:<checkoutId> = the order; pm:pending = checkouts not yet paid/handled; pm:done:<id> = handled once.
 // Safety: we only act when PayMongo itself says the checkout is paid for the exact amount; at most
@@ -2165,7 +2174,7 @@ async function getClaudeReply(senderId, userText) {
     "EVERY customer message in it comes from the same single person, so never say you are busy with or helping " +
     "someone else. Names mentioned in the chat (e.g. on a reseller application) belong to this person unless they " +
     "clearly say the eSIM is for someone else.\n\n" + BUSINESS_INFO +
-    (pm.configured()
+    (pm.configured() && !pm.isTest()
       ? "\n\n--- ONLINE PAYMENT (PayMongo) ---\nFor GCash, Maya, QR Ph or Philippine bank payments, create_order sends the customer a secure payment link " +
         "(QR Ph: scan with GCash, Maya or any bank app" + (pm.methods().includes("card") ? "; cards also accepted" : "") + "). Payment is confirmed automatically and the eSIM QR " +
         "is sent automatically in this chat within a few minutes, so do NOT ask for a payment screenshot for these orders. PayPal stays manual (screenshot needed)."
