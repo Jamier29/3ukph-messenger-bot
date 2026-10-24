@@ -218,3 +218,17 @@ link can download it.
   message (WhatsApp free window), skipped after "no/later/cancel/thanks", while the admin is replying, or once they
   sent a payment screenshot. Max one per 24 h. Messenger never gets automatic follow-ups (Meta policy).
 - Console card "Unpaid orders & follow-ups": on/off switch, delay, and the list of undelivered orders (7 days).
+
+
+## Automatic payments (PayMongo)
+
+Set `PAYMONGO_SECRET_KEY` in Render (`sk_test_...` to test, `sk_live_...` for real money).
+When set, GCash / Maya / bank / QR Ph orders get a secure PayMongo checkout link instead of our static QR.
+Payment is confirmed automatically (webhook `/webhooks/paymongo`, registered on startup, plus a 90-second
+backup check) and the eSIM is bought and sent automatically. In test mode nothing is bought.
+
+Optional settings: `PAYMONGO_METHODS` (default `qrph`; e.g. `qrph,gcash,paymaya,card` after the account
+upgrade), `AUTO_DELIVER` (`off` = confirm payment automatically but deliver by hand),
+`AUTO_DELIVER_MAX_PHP` (default 15000 per order), `AUTO_DELIVER_DAILY_MAX` (default 30 a day).
+Anything unusual (amount mismatch, limits, eSIMCard error) -> customer is told the payment is confirmed
+and the admin gets an urgent ntfy alert to deliver from the console.

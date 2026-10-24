@@ -20,6 +20,7 @@ const crypto = require("crypto");
 const ExcelJS = require("exceljs");
 const reseller = require("./reseller");
 const kit = require("./marketingKit");
+const pm = require("./paymongo");
 const { tripContext } = require("./tripAdvisor");
 const esims = require("./esimcard");
 
@@ -27,7 +28,8 @@ const app = express();
 // Admin image uploads (QR codes) are bigger than normal requests.
 app.use("/admin/api/send-image", express.json({ limit: "12mb" }));
 app.use("/admin/api/kit/library", express.json({ limit: "4mb" }));
-app.use(express.json());
+// rawBody is kept for webhook signature checks (PayMongo).
+app.use(express.json({ verify: (req, res, buf) => { req.rawBody = buf; } }));
 
 const PORT = process.env.PORT || 3000;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
@@ -80,7 +82,9 @@ const PAYMENT_METHODS = {
   unionbank: "UnionBank",
   bpi: "BPI",
   paypal: "PayPal",
-  wallet: "Reseller wallet"
+  wallet: "Reseller wallet",
+  qrph: "QR Ph",
+  card: "Credit/Debit card"
 };
 
 // PayPal (for customers abroad): they pay in USD via this payment link, where
@@ -133,7 +137,10 @@ function normalizePaymentMethod(input) {
   if (s.includes("union")) return "unionbank";
   if (s.includes("bpi") || s.includes("philippineislands")) return "bpi";
   if (s.includes("wallet")) return "wallet";
-  if (s.includes("paypal") || s.includes("card") || s.includes("visa") || s.includes("mastercard")) return "paypal";
+  if (s.includes("qrph") || s === "qr" || s.includes("instapay")) return "qrph";
+  if (s.includes("paypal")) return "paypal";
+  // Cards go through PayMongo once cards are enabled there, otherwise PayPal (which takes cards too).
+  if (s.includes("card") || s.includes("visa") || s.includes("mastercard")) return pm.configured() && pm.methods().includes("card") ? "card" : "paypal";
   return null;
 }
 
@@ -355,7 +362,7 @@ const TOOLS = [
       properties: {
         planId: { type: "string", description: "The planId of the EXACT plan the customer confirmed (the one whose price you quoted)." },
         confirmedPrice: { type: "string", description: "The exact peso price you last quoted the customer for this plan, from get_plan (e.g. '₱1,037.88', the discounted price if a code was accepted, or the resellerPrice for an approved reseller)." },
-        paymentMethod: { type: "string", enum: ["GCash", "Maya", "MariBank", "UnionBank", "BPI", "PayPal", "Wallet"], description: "\"Wallet\" is only for approved Gold resellers paying from their prepaid reseller wallet." },
+        paymentMethod: { type: "string", enum: ["GCash", "Maya", "MariBank", "UnionBank", "BPI", "QR Ph", "Card", "PayPal", "Wallet"], description: "\"Wallet\" is only for approved Gold resellers paying from their prepaid reseller wallet. \"QR Ph\" = scan to pay with GCash, Maya or any bank app." },
         email: { type: "string", description: "Email address where the eSIM QR code should be sent." },
         deliverVia: { type: "string", enum: ["Messenger", "Email", "Both"], description: "How the customer wants the eSIM QR code." },
         discountCode: { type: "string", description: "The discount code the customer gave, if any (only one that get_plan accepted)." },
@@ -589,6 +596,55 @@ async function runTool(name, input, senderId) {
             `then send a screenshot of the PayPal receipt here. Their eSIM QR code arrives after the payment is confirmed. ` +
             `Quote ONLY ${usdText} for this order (not the peso price).`
         };
+      }
+
+      // PayMongo: a secure checkout link for the exact amount. Paid -> confirmed automatically
+      // (webhook + backup check) -> eSIM bought and sent automatically. Falls back to our QR images.
+      if (pm.configured() && PUBLIC_URL && ["gcash", "maya", "maribank", "unionbank", "bpi", "qrph", "card"].includes(methodKey)) {
+        try {
+          const ref = "3UK-" + Date.now().toString(36).toUpperCase();
+          const planLabel = `${plan.name} (${plan.destination}, ${plan.data}, ${plan.validityDays} days${plan.callsAndTexts ? ", with calls & texts" : ""})`;
+          const types = methodKey === "card" ? ["card"] : pm.methods();
+          const co = await pm.createCheckout({
+            amountPHP: plan.pricePHP, name: `eSIM ${plan.name}`, description: `3UK Philippines eSIM: ${planLabel}`,
+            reference: ref, successUrl: `${PUBLIC_URL}/paid`, cancelUrl: `${PUBLIC_URL}/chat`, metadata: { ref, psid: senderId }, types
+          });
+          await pmSaveOrder(co.id, {
+            ref, psid: senderId, planId: plan.planId, planName: plan.name, planLabel, pricePHP: plan.pricePHP, amount: co.amount,
+            email, method: methodName, reseller: !!resellerPlan, discount: plan.discountCode || null, createdAt: Date.now(), status: "pending"
+          });
+          const howTo = types.includes("qrph")
+            ? "Scan the QR Ph code on the page with GCash, Maya or any bank app (InstaPay)."
+            : "Choose your payment method on the page.";
+          await sendText(senderId,
+            `💳 Secure payment link (${plan.price}):\n${co.url}\n\n${howTo}\n` +
+            "✅ No screenshot needed: once paid, your eSIM QR code is sent here automatically within a few minutes." +
+            (pm.isTest() ? "\n\n[TEST MODE: no real payment]" : ""));
+          const customer = await getCustomerName(senderId);
+          await notifyAdmin({
+            title: `New ${resellerTag}order: ${plan.price} (PayMongo link sent)`,
+            message: `Customer: ${customer}\nPlan: ${planLabel}\nPrice: ${plan.price}\n` + discountNote +
+              `Email: ${email}\nRef: ${ref}\n${pm.isTest() ? "TEST MODE\n" : ""}Paid orders are confirmed and delivered automatically.`,
+            tags: "moneybag"
+          });
+          return {
+            ok: true, plan: plan.name, price: plan.price,
+            ...(plan.discountCode ? { regularPrice: plan.regularPrice, discountApplied: `${plan.discountCode} (${plan.discountPercent}% off)` } : {}),
+            ...(plan.discountError ? { discountNotApplied: plan.discountError } : {}),
+            paymentMethod: "Secure PayMongo payment link", paymentLinkSentToCustomer: true,
+            instructionsForYou:
+              `A secure payment link for exactly ${plan.price} was just sent to the customer (do not repeat the link). ` +
+              `Briefly tell them to open it and pay${types.includes("qrph") ? " by scanning the QR Ph code with GCash, Maya or any bank app" : ""}. ` +
+              "Their eSIM QR code will arrive here automatically within a few minutes after payment, so they do NOT need to send a screenshot. " +
+              "If they have trouble paying, hand off to the admin."
+          };
+        } catch (err) {
+          console.error("[paymongo] checkout failed, using QR images instead:", err.message);
+          notifyAdmin({ title: "PayMongo link failed", message: `${err.message}\nUsed the manual QR instead.`, tags: "warning" }).catch(() => {});
+          if (methodKey === "card" || methodKey === "qrph") {
+            return { error: "Online payment link is temporarily unavailable. Offer GCash, Maya or bank transfer (or PayPal for cards) instead." };
+          }
+        }
       }
 
       // All our QR codes are InstaPay QRs, which any Philippine bank or e-wallet app can scan.
@@ -1272,34 +1328,41 @@ app.get("/admin/api/delivery", requireAdmin, async (req, res) => {
   }
   res.json(out);
 });
-app.post("/admin/api/deliver", requireAdmin, async (req, res) => {
-  const b = req.body || {};
-  const psid = String(b.psid || "");
-  if (!/^(wa)?\d+$/.test(psid)) return res.status(400).json({ error: "Pick a conversation first." });
-  if (!esims.configured()) return res.status(400).json({ error: "ESIMCARD_TOKEN is not set in Render." });
-  const plan = getPlan(b.planId);
-  if (!plan) return res.status(400).json({ error: "Pick the plan first." });
-  if (deliveryLocks.has(psid)) return res.status(409).json({ error: "A delivery for this customer is already running. Wait a moment." });
+// Buys the eSIM on eSIMCard and sends the branded QR + install text to the customer.
+// Used by the console's 1-tap Deliver and by automatic PayMongo delivery.
+// opts.packageId: the package the admin checked (console). opts.auto: paid online, no admin.
+// opts.paidPHP: amount the customer paid (auto only) -- never deliver below cost.
+function deliverError(status, message, extra) { const e = new Error(message); e.status = status; Object.assign(e, extra || {}); return e; }
+async function deliverEsim(psid, planId, opts = {}) {
+  if (!esims.configured()) throw deliverError(400, "ESIMCARD_TOKEN is not set in Render.");
+  const plan = getPlan(planId);
+  if (!plan) throw deliverError(400, "Pick the plan first.");
+  if (deliveryLocks.has(psid)) throw deliverError(409, "A delivery for this customer is already running. Wait a moment.");
   deliveryLocks.add(psid);
   try {
     const rawPlan = getRawPlan(plan.planId);
     const pkg = await esims.findPackage(plan.name, { retailUSD: rawPlan && rawPlan.retailPrice, costUSD: reseller.costOf(rawPlan) });
-    if (pkg && pkg.loading) return res.status(503).json({ error: "The eSIMCard package list is still downloading. Try again in a few minutes." });
-    if (pkg && pkg.ambiguous) return res.status(400).json({ error: `eSIMCard has ${pkg.matches} packages with this name. Deliver this one manually.` });
-    if (!pkg) return res.status(400).json({ error: `eSIMCard has no package named "${plan.name}". Deliver this one manually.` });
-    if (String(b.packageId || "") !== pkg.id) return res.status(409).json({ error: "The package changed since you checked. Tap Check again." });
+    if (pkg && pkg.loading) throw deliverError(503, "The eSIMCard package list is still downloading. Try again in a few minutes.");
+    if (pkg && pkg.ambiguous) throw deliverError(400, `eSIMCard has ${pkg.matches} packages with this name. Deliver this one manually.`);
+    if (!pkg) throw deliverError(400, `eSIMCard has no package named "${plan.name}". Deliver this one manually.`);
+    if (!opts.auto && String(opts.packageId || "") !== pkg.id) throw deliverError(409, "The package changed since you checked. Tap Check again.");
     // Final check on eSIMCard right before buying: same package name, price not changed much.
+    let costUSD = pkg.price;
     try {
       const live = await esims.packageDetail(pkg.id);
-      if (live.name && live.name.toLowerCase() !== plan.name.toLowerCase()) return res.status(409).json({ error: `eSIMCard package is now "${live.name}", not "${plan.name}". Not bought; deliver manually.` });
-      if (live.price && pkg.price && live.price > pkg.price * 1.1) return res.status(409).json({ error: `eSIMCard price went up to $${live.price.toFixed(2)} (was $${pkg.price.toFixed(2)}). Not bought; check before delivering.` });
-    } catch (e) { console.error("[deliver] detail check skipped:", e.message); }
+      if (live.name && live.name.toLowerCase() !== plan.name.toLowerCase()) throw deliverError(409, `eSIMCard package is now "${live.name}", not "${plan.name}". Not bought; deliver manually.`);
+      if (live.price && pkg.price && live.price > pkg.price * 1.1) throw deliverError(409, `eSIMCard price went up to $${live.price.toFixed(2)} (was $${pkg.price.toFixed(2)}). Not bought; check before delivering.`);
+      if (live.price) costUSD = live.price;
+    } catch (e) { if (e.status) throw e; console.error("[deliver] detail check skipped:", e.message); }
+    if (opts.auto && costUSD && opts.paidPHP && costUSD * getRate() > opts.paidPHP) {
+      throw deliverError(409, `Cost ${formatPHP(costUSD * getRate())} is higher than the ${formatPHP(opts.paidPHP)} paid. Not bought; check the price.`);
+    }
     let sim;
     try { sim = await esims.purchase(pkg.id); }
-    catch (e) { await notifyAdmin({ title: "eSIM purchase FAILED", message: `${await getCustomerName(psid)}\n${plan.name}\n${e.message}`, tags: "warning" }); return res.status(502).json({ error: e.message }); }
+    catch (e) { await notifyAdmin({ title: "eSIM purchase FAILED", message: `${await getCustomerName(psid)}\n${plan.name}\n${e.message}`, tags: "warning" }); throw deliverError(502, e.message); }
     if (!sim.lpa && !sim.iccid) {
       await notifyAdmin({ title: "eSIM bought, details missing", message: `${await getCustomerName(psid)}\n${plan.name}\nCheck eSIMCard "My eSIMs" and send the QR manually.`, tags: "warning" });
-      return res.status(502).json({ error: "The eSIM was bought, but eSIMCard didn't return the QR yet. Open eSIMCard > My eSIMs and send it manually (don't buy again).", bought: true });
+      throw deliverError(502, "The eSIM was bought, but eSIMCard didn't return the QR yet. Open eSIMCard > My eSIMs and send it manually (don't buy again).", { bought: true });
     }
     const steps = [];
     if (sim.lpa) {
@@ -1318,18 +1381,173 @@ app.post("/admin/api/deliver", requireAdmin, async (req, res) => {
     lines.push("", "📲 Get our free app for one-tap reloads and data checks: open 3ukph.com and tap Install (iPhone: Safari › Share › Add to Home Screen).");
     await adminSendText(psid, lines.join("\n"));
     steps.push("text");
+    if (opts.auto) pausedUntil.delete(psid); // automatic delivery: keep the AI assistant on for follow-up questions
     const order = await getLastOrder(psid);
     if (sim.iccid) {
-      try { await esims.addEsim(psid, { iccid: sim.iccid, plan: plan.name, email: (order && order.email) || "", note: "Auto-delivered" }); } catch (e) { console.error("[deliver] save ICCID:", e.message); }
+      try { await esims.addEsim(psid, { iccid: sim.iccid, plan: plan.name, email: (order && order.email) || "", note: opts.auto ? "Auto-delivered (PayMongo)" : "Auto-delivered" }); } catch (e) { console.error("[deliver] save ICCID:", e.message); }
     }
-    await saveLastOrder(psid, { ...(order && order.planId === plan.planId ? order : { planId: plan.planId, plan: plan.name, price: plan.price, method: "(chosen in console)", at: new Date().toISOString() }), deliveredAt: new Date().toISOString(), iccid: sim.iccid || null });
+    await saveLastOrder(psid, { ...(order && order.planId === plan.planId ? order : { planId: plan.planId, plan: plan.name, price: plan.price, method: opts.auto ? "PayMongo" : "(chosen in console)", at: new Date().toISOString() }), deliveredAt: new Date().toISOString(), iccid: sim.iccid || null });
     appendNote(psid, `[ADMIN UPDATE: The customer's eSIM (${plan.name}${sim.iccid ? ", ICCID ending " + sim.iccid.slice(-4) : ""}) was just delivered with its QR code and install links. Help them install it if they ask. Use check_data_usage for data questions.]`);
-    notifyAdmin({ title: "eSIM delivered", message: `${await getCustomerName(psid)}\n${plan.name}${sim.iccid ? "\nICCID " + sim.iccid : ""}`, tags: "white_check_mark" }).catch(() => {});
-    res.json({ ok: true, iccid: sim.iccid || null, steps, costUSD: pkg.price });
+    notifyAdmin({ title: opts.auto ? "eSIM auto-delivered ✅" : "eSIM delivered", message: `${await getCustomerName(psid)}\n${plan.name}${sim.iccid ? "\nICCID " + sim.iccid : ""}${costUSD ? `\nCost $${Number(costUSD).toFixed(2)}` : ""}`, tags: "white_check_mark" }).catch(() => {});
+    return { ok: true, iccid: sim.iccid || null, steps, costUSD };
+  } finally { deliveryLocks.delete(psid); }
+}
+
+app.post("/admin/api/deliver", requireAdmin, async (req, res) => {
+  const b = req.body || {};
+  const psid = String(b.psid || "");
+  if (!/^(wa)?\d+$/.test(psid)) return res.status(400).json({ error: "Pick a conversation first." });
+  try {
+    res.json(await deliverEsim(psid, b.planId, { packageId: b.packageId }));
   } catch (e) {
     console.error("[deliver] failed:", e.message);
-    res.status(502).json({ error: e.message });
-  } finally { deliveryLocks.delete(psid); }
+    res.status(e.status || 502).json({ error: e.message, ...(e.bought ? { bought: true } : {}) });
+  }
+});
+
+// ---- PayMongo: automatic payment confirmation + automatic delivery ----
+// pm:order:<checkoutId> = the order; pm:pending = checkouts not yet paid/handled; pm:done:<id> = handled once.
+// Safety: we only act when PayMongo itself says the checkout is paid for the exact amount; at most
+// AUTO_DELIVER_MAX_PHP per order and AUTO_DELIVER_DAILY_MAX auto-deliveries a day; never below cost.
+// Anything unusual -> the customer is told payment is confirmed and the admin gets an urgent alert.
+const AUTO_DELIVER = String(process.env.AUTO_DELIVER || "on").toLowerCase() !== "off";
+const AUTO_DELIVER_MAX_PHP = Number(process.env.AUTO_DELIVER_MAX_PHP) || 15000;
+const AUTO_DELIVER_DAILY_MAX = Number(process.env.AUTO_DELIVER_DAILY_MAX) || 30;
+const pmMem = { orders: new Map(), pending: new Set(), done: new Set(), daily: new Map() };
+let pmWebhookSecret = null;
+
+async function pmSaveOrder(id, o) {
+  if (!hasDb()) { pmMem.orders.set(id, o); pmMem.pending.add(id); return; }
+  await redis(["SET", `pm:order:${id}`, JSON.stringify(o), "EX", 60 * 24 * 3600]);
+  await redis(["SADD", "pm:pending", id]);
+}
+async function pmGetOrder(id) {
+  if (!hasDb()) return pmMem.orders.get(id) || null;
+  const v = await redis(["GET", `pm:order:${id}`]).catch(() => null);
+  try { return v ? JSON.parse(v) : null; } catch { return null; }
+}
+async function pmUpdateOrder(id, patch) {
+  const o = await pmGetOrder(id); if (!o) return;
+  const n = { ...o, ...patch };
+  if (!hasDb()) { pmMem.orders.set(id, n); return; }
+  await redis(["SET", `pm:order:${id}`, JSON.stringify(n), "EX", 60 * 24 * 3600]).catch(() => {});
+}
+async function pmUnpend(id) {
+  if (!hasDb()) { pmMem.pending.delete(id); return; }
+  await redis(["SREM", "pm:pending", id]).catch(() => {});
+}
+async function pmClaimOnce(id) { // true only the first time
+  if (!hasDb()) { if (pmMem.done.has(id)) return false; pmMem.done.add(id); return true; }
+  return (await redis(["SET", `pm:done:${id}`, "1", "NX", "EX", 60 * 24 * 3600])) === "OK";
+}
+async function pmDailyCount() { // increments and returns today's auto-delivery count (Manila date)
+  const day = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+  if (!hasDb()) { const n = (pmMem.daily.get(day) || 0) + 1; pmMem.daily.set(day, n); return n; }
+  const n = Number(await redis(["INCR", `pm:auto:${day}`])); await redis(["EXPIRE", `pm:auto:${day}`, 3 * 24 * 3600]).catch(() => {});
+  return n;
+}
+
+const pmBusy = new Set();
+async function handlePaidCheckout(id, source) {
+  if (pmBusy.has(id)) return;
+  pmBusy.add(id);
+  try {
+    const order = await pmGetOrder(id);
+    if (!order) return; // not one of ours
+    const session = await pm.getCheckout(id);
+    const info = pm.paidInfo(session);
+    if (!info.paid) return;
+    if (!(await pmClaimOnce(id))) { await pmUnpend(id); return; }
+    await pmUnpend(id);
+    const psid = order.psid;
+    const customer = await getCustomerName(psid);
+    console.log(`[paymongo] PAID ${id} (${source}) ${order.planName} ${formatPHP(order.pricePHP)}`);
+    await pmUpdateOrder(id, { status: "paid", paidAt: Date.now(), paidAmount: info.amount, paymentId: info.paymentId, payMethod: info.method });
+    notifyAdmin({ title: `💰 PAID ${formatPHP(order.pricePHP)} via PayMongo${pm.isTest() ? " (TEST)" : ""}`,
+      message: `${customer}\n${order.planLabel || order.planName}\nRef ${order.ref}${info.method ? "\nMethod: " + info.method : ""}`, tags: "moneybag", priority: "high" }).catch(() => {});
+
+    let told = false;
+    const manual = async (reason) => {
+      await pmUpdateOrder(id, { status: "needs-admin", reason });
+      await notifyAdmin({ title: "PAID order needs you", priority: "urgent", tags: "rotating_light",
+        message: `${customer} PAID ${formatPHP(order.pricePHP)} for ${order.planName} (ref ${order.ref}), but it was NOT auto-delivered:\n${reason}\n👉 Open the chat in the console and use 1-tap Deliver (or send it manually).` }).catch(() => {});
+      try {
+        await adminSendText(psid, told
+          ? "Your eSIM needs a quick check by our team; it will be sent here shortly. Thank you for your patience! 🙏"
+          : `✅ Payment received (${formatPHP(order.pricePHP)}). Thank you! Our team is preparing your eSIM and will send it here shortly. 🙏`);
+        pausedUntil.delete(psid);
+      }
+      catch (e) { console.error("[paymongo] couldn't message customer:", e.message); }
+    };
+
+    if (Math.round(order.pricePHP * 100) !== Number(info.amount)) return manual(`Amount paid (${formatPHP(Number(info.amount) / 100)}) doesn't match the order (${formatPHP(order.pricePHP)}).`);
+    if (pm.isTest()) {
+      await pmUpdateOrder(id, { status: "test-done" });
+      try { await adminSendText(psid, `✅ [TEST MODE] Payment of ${formatPHP(order.pricePHP)} confirmed automatically. In live mode your eSIM (${order.planName}) would be bought and sent here right now. No real eSIM was bought.`); pausedUntil.delete(psid); }
+      catch (e) { console.error("[paymongo] test message failed:", e.message); }
+      return;
+    }
+    if (!AUTO_DELIVER) return manual("Automatic delivery is switched off (AUTO_DELIVER=off).");
+    if (order.pricePHP > AUTO_DELIVER_MAX_PHP) return manual(`Order is above the auto-delivery limit of ${formatPHP(AUTO_DELIVER_MAX_PHP)}.`);
+    if ((await pmDailyCount()) > AUTO_DELIVER_DAILY_MAX) return manual(`Daily auto-delivery limit (${AUTO_DELIVER_DAILY_MAX}) reached.`);
+    try {
+      await adminSendText(psid, `✅ Payment received (${formatPHP(order.pricePHP)}). Thank you! Preparing your eSIM now... ⏳`);
+      told = true;
+      const r = await deliverEsim(psid, order.planId, { auto: true, paidPHP: order.pricePHP });
+      await pmUpdateOrder(id, { status: "delivered", deliveredAt: Date.now(), iccid: r.iccid || null, costUSD: r.costUSD || null });
+    } catch (e) {
+      console.error("[paymongo] auto-delivery failed:", e.message);
+      return manual((e.bought ? "⚠️ The eSIM WAS bought but the QR didn't come back -- check eSIMCard > My eSIMs, don't buy again. " : "") + e.message);
+    }
+  } catch (e) {
+    console.error(`[paymongo] handling ${id} failed:`, e.message);
+  } finally { pmBusy.delete(id); }
+}
+
+// PayMongo calls this when a checkout is paid. We always re-check with PayMongo before acting.
+app.post("/webhooks/paymongo", (req, res) => {
+  res.sendStatus(200);
+  try {
+    const ev = req.body && req.body.data && req.body.data.attributes;
+    const type = ev && ev.type;
+    if (pmWebhookSecret && !pm.verifySignature(req.get("Paymongo-Signature"), req.rawBody, pmWebhookSecret)) {
+      console.warn("[paymongo] webhook signature did not verify; re-checking with PayMongo directly");
+    }
+    const id = ev && ev.data && ev.data.id;
+    if (type === "checkout_session.payment.paid" && id) handlePaidCheckout(id, "webhook");
+  } catch (e) { console.error("[paymongo] webhook error:", e.message); }
+});
+
+// Backup: every 90s, ask PayMongo about recent unpaid checkouts (in case a webhook was missed).
+async function pmPoll() {
+  if (!pm.configured()) return;
+  let ids = [];
+  try { ids = hasDb() ? ((await redis(["SMEMBERS", "pm:pending"])) || []) : [...pmMem.pending]; } catch { return; }
+  for (const id of ids.slice(0, 40)) {
+    const o = await pmGetOrder(id);
+    if (!o || Date.now() - (o.createdAt || 0) > 48 * 3600 * 1000) { await pmUnpend(id); continue; }
+    await handlePaidCheckout(id, "poll");
+  }
+}
+if (pm.configured()) {
+  setInterval(() => pmPoll().catch((e) => console.error("[paymongo] poll:", e.message)), 90 * 1000);
+  const hookBase = (process.env.RENDER_EXTERNAL_URL || PUBLIC_URL || "").replace(/\/$/, "");
+  if (hookBase) {
+    pm.ensureWebhook(`${hookBase}/webhooks/paymongo`)
+      .then((secret) => { pmWebhookSecret = secret; console.log(`[paymongo] ready (${pm.isTest() ? "TEST" : "LIVE"} mode, methods: ${pm.methods().join(", ")})`); })
+      .catch((e) => console.error("[paymongo] webhook setup failed (backup polling still works):", e.message));
+  }
+}
+
+// Where PayMongo sends the customer after paying.
+app.get("/paid", (req, res) => {
+  res.type("html").send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Payment received | 3UK Philippines</title>
+<style>body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#f4f7fc;color:#15204a;display:flex;min-height:100vh;align-items:center;justify-content:center}
+.c{background:#fff;max-width:420px;margin:16px;padding:32px 24px;border-radius:20px;box-shadow:0 8px 30px rgba(14,37,120,.12);text-align:center}
+h1{color:#0e2578;font-size:26px;margin:12px 0}p{line-height:1.5;color:#3b4570}a.b{display:inline-block;margin:8px 4px;padding:12px 18px;border-radius:999px;background:#0e2578;color:#fff;text-decoration:none;font-weight:600}
+a.w{background:#25d366}</style></head><body><div class="c"><img src="/logo.png" alt="3UK Philippines" width="90" height="90">
+<h1>Payment received ✅</h1><p>Thank you! Your eSIM QR code will be sent to your chat (WhatsApp or Messenger) automatically within a few minutes.</p>
+<p>You can close this page and go back to the chat.</p><a class="b w" href="https://wa.me/639347069356">Back to WhatsApp</a><a class="b" href="https://3ukph.com">3ukph.com</a></div></body></html>`);
 });
 
 // ---- Automatic follow-up (WhatsApp only) -------------------------------------
@@ -1946,7 +2164,12 @@ async function getClaudeReply(senderId, userText) {
     "try the region or a global plan before saying so. Write plain text only (no asterisks or markdown). This is a private one-to-one chat: " +
     "EVERY customer message in it comes from the same single person, so never say you are busy with or helping " +
     "someone else. Names mentioned in the chat (e.g. on a reseller application) belong to this person unless they " +
-    "clearly say the eSIM is for someone else.\n\n" + BUSINESS_INFO;
+    "clearly say the eSIM is for someone else.\n\n" + BUSINESS_INFO +
+    (pm.configured()
+      ? "\n\n--- ONLINE PAYMENT (PayMongo) ---\nFor GCash, Maya, QR Ph or Philippine bank payments, create_order sends the customer a secure payment link " +
+        "(QR Ph: scan with GCash, Maya or any bank app" + (pm.methods().includes("card") ? "; cards also accepted" : "") + "). Payment is confirmed automatically and the eSIM QR " +
+        "is sent automatically in this chat within a few minutes, so do NOT ask for a payment screenshot for these orders. PayPal stays manual (screenshot needed)."
+      : "");
   // Travel brain: work out the trip from the customer's recent messages and pre-pick the right plan.
   const recentUserTexts = getHistory(senderId).filter((m) => m.role === "user" && typeof m.content === "string")
     .slice(-8).map((m) => m.content).concat([userText]);
@@ -2322,3 +2545,6 @@ startPriceSync();
 app.listen(PORT, () => {
   console.log(`3UKPH Messenger bot listening on port ${PORT}`);
 });
+
+// Test hook (only when NODE_ENV=test): lets local tests call internals.
+if (process.env.NODE_ENV === "test") global.__test = { runTool, handlePaidCheckout, pmGetOrder, pmPoll };
