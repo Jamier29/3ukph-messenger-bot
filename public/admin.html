@@ -278,6 +278,11 @@
         <button id="txBtn" title="Save this wallet change">Save</button>
       </div>
       <div class="status" id="txStatus"></div>
+      <h2 style="margin-top:14px">API access</h2>
+      <p class="help">Lets this partner's website order automatically, paid from this wallet. Docs for their developer: <a href="/partner/docs" target="_blank">3ukph.com/partner/docs</a></p>
+      <div id="apiKeyBox" class="help">Loading…</div>
+      <div class="row" style="margin-top:6px"><button class="ghost" id="apiKeyBtn">Create API key</button><button class="ghost hidden" id="apiRevokeBtn">Revoke key</button></div>
+      <div class="status" id="apiKeyStatus"></div>
       <div class="row" style="margin:10px 0"><button class="ghost" id="csvBtn" title="Download this reseller's history for Excel">⬇ Download CSV</button></div>
       <div style="overflow-x:auto"><table class="ledger" id="ledgerTable"></table></div>
     </section>
@@ -705,10 +710,33 @@
   function openWallet(psid, name) {
     walletPsid = psid; walletName = name || psid;
     $("walletCard").classList.remove("hidden"); $("walletTitle").textContent = "Wallet: " + walletName; $("txStatus").textContent = "";
-    loadWallet();
+    $("apiKeyStatus").textContent = ""; loadWallet(); loadApiKey();
     setTimeout(function () { $("walletCard").scrollIntoView({ behavior: "smooth" }); }, 50);
   }
 
+  function loadApiKey() {
+    if (!walletPsid) return;
+    api("/admin/api/partner-key?psid=" + encodeURIComponent(walletPsid)).then(function (d) {
+      $("apiKeyBox").innerHTML = d.active ? "✓ API key active (ends in <b>" + esc(d.last4) + "</b>, created " + esc(fmt(d.createdAt)) + ")." : "No API key yet.";
+      $("apiKeyBtn").textContent = d.active ? "Replace API key" : "Create API key";
+      $("apiRevokeBtn").classList.toggle("hidden", !d.active);
+    }).catch(function (e) { $("apiKeyBox").textContent = e.message; });
+  }
+  function createApiKey() {
+    if (!walletPsid) return;
+    if ($("apiKeyBtn").textContent.indexOf("Replace") === 0 && !confirm("Replace the key? The old key stops working right away.")) return;
+    api("/admin/api/partner-key", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ psid: walletPsid }) }).then(function (d) {
+      $("apiKeyStatus").className = "status ok";
+      $("apiKeyStatus").innerHTML = "New key (shown only once, copy it now and send it privately to the partner):<br><code style='user-select:all;word-break:break-all'>" + esc(d.key) + "</code>";
+      loadApiKey();
+    }).catch(function (e) { $("apiKeyStatus").className = "status err"; $("apiKeyStatus").textContent = e.message; });
+  }
+  function revokeApiKey() {
+    if (!walletPsid || !confirm("Revoke this partner's API key? Their website will stop ordering.")) return;
+    api("/admin/api/partner-key/revoke", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ psid: walletPsid }) })
+      .then(function () { loadApiKey(); $("apiKeyStatus").className = "status ok"; $("apiKeyStatus").textContent = "Key revoked."; })
+      .catch(function (e) { $("apiKeyStatus").className = "status err"; $("apiKeyStatus").textContent = e.message; });
+  }
   function loadWallet() {
     if (!walletPsid) return;
     api("/admin/api/wallet?psid=" + encodeURIComponent(walletPsid)).then(function (d) {
@@ -810,6 +838,8 @@
   }
   $("sheetAsiaBtn").onclick = function () { partnerSheet("asia"); };
   $("sheetAllBtn").onclick = function () { partnerSheet("all"); };
+  $("apiKeyBtn").onclick = createApiKey;
+  $("apiRevokeBtn").onclick = revokeApiKey;
   $("allCsvBtn").onclick = allCsv;
   $("costsBtn").onclick = uploadCosts;
   // Installable app: register the service worker and offer an Install button.

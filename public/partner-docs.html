@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3UK Philippines Partner API</title>
+<meta name="robots" content="noindex">
+<style>
+  :root { --navy:#1e3a8a; --red:#c8102e; --ink:#111827; --muted:#4b5563; --line:#e5e7eb; --bg:#f8fafc; --code:#0f172a; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif; color:var(--ink); background:var(--bg); }
+  header { background:var(--navy); color:#fff; padding:28px 16px; }
+  header h1 { margin:0 0 4px; font-size:26px; } header p { margin:0; opacity:.85; }
+  main { max-width:860px; margin:0 auto; padding:16px; }
+  section { background:#fff; border:1px solid var(--line); border-radius:12px; padding:18px 20px; margin:16px 0; }
+  h2 { color:var(--navy); margin:0 0 8px; font-size:20px; } h3 { margin:18px 0 6px; font-size:16px; }
+  code { background:#eef2ff; padding:1px 5px; border-radius:4px; font-size:14px; }
+  pre { background:var(--code); color:#e2e8f0; padding:14px; border-radius:8px; overflow-x:auto; font-size:13px; line-height:1.5; }
+  pre code { background:none; padding:0; color:inherit; }
+  .m { display:inline-block; font-weight:700; font-size:12px; padding:2px 8px; border-radius:4px; color:#fff; margin-right:6px; }
+  .get { background:#047857; } .post { background:var(--red); }
+  table { border-collapse:collapse; width:100%; font-size:14px; } td, th { border-bottom:1px solid var(--line); padding:6px 8px; text-align:left; vertical-align:top; }
+  .muted { color:var(--muted); font-size:14px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>3UK Philippines Partner API</h1>
+  <p>Order eSIMs automatically from your website or booking system. Version 1.</p>
+</header>
+<main>
+<section>
+  <h2>Overview</h2>
+  <p>The API lets your system list our eSIM plans with your partner prices, place orders that are paid from your prepaid partner wallet, and receive the eSIM QR code right away.</p>
+  <table>
+    <tr><th>Base URL</th><td><code>https://3ukph.com/partner/v1</code></td></tr>
+    <tr><th>Format</th><td>JSON over HTTPS. Prices are in Philippine pesos (PHP).</td></tr>
+    <tr><th>Auth</th><td>Header <code>Authorization: Bearer YOUR_API_KEY</code></td></tr>
+    <tr><th>Limits</th><td>60 requests per minute. A daily order limit applies per partner (see <code>/me</code>).</td></tr>
+  </table>
+  <p class="muted">Keep your API key secret and use it only from your server, never in a web page or mobile app. If it leaks, ask us to replace it.</p>
+</section>
+
+<section>
+  <h2>Quick start</h2>
+  <ol>
+    <li>Get your API key from 3UK Philippines and top up your partner wallet.</li>
+    <li>Call <code>GET /plans</code> and save the <code>planId</code> of the plans you sell.</li>
+    <li>When a guest buys, call <code>POST /orders</code> with the <code>planId</code> and your own order number as <code>reference</code>.</li>
+    <li>Show or email the returned QR code (<code>esim.qrCodePng</code>) to your guest.</li>
+  </ol>
+</section>
+
+<section>
+  <h2>Endpoints</h2>
+
+  <h3><span class="m get">GET</span>/me</h3>
+  <p>Your account, wallet balance and daily order limit.</p>
+<pre><code>curl https://3ukph.com/partner/v1/me -H "Authorization: Bearer YOUR_API_KEY"
+
+{ "partner": "TripHappy", "tier": "partner", "walletBalancePHP": 5000, "dailyOrderLimit": 50 }</code></pre>
+
+  <h3><span class="m get">GET</span>/plans</h3>
+  <p>All plans you can order, with your price. Optional filters: <code>destination</code> (e.g. <code>Japan</code>; also matches regional plans that cover it) and <code>type</code> (<code>country</code> or <code>regional</code>).</p>
+<pre><code>curl "https://3ukph.com/partner/v1/plans?destination=Japan" -H "Authorization: Bearer YOUR_API_KEY"
+
+{ "currency": "PHP", "count": 48, "plans": [
+  { "planId": "pl_3f9a1c2b7d10", "destination": "Japan", "type": "country",
+    "name": "10GB eSIM Data for 7 Days for Japan", "data": "10GB", "unlimited": false,
+    "validityDays": 7, "countries": ["Japan"], "suggestedRetailPHP": 421.2, "pricePHP": 361 } ] }</code></pre>
+  <p class="muted"><code>pricePHP</code> is what you pay. <code>suggestedRetailPHP</code> is our public price; you may set your own selling price. Refresh the list daily, as prices can change.</p>
+
+  <h3><span class="m post">POST</span>/orders</h3>
+  <p>Places an order, pays it from your wallet and issues the eSIM. Usually takes 5 to 40 seconds, so set your HTTP timeout to at least 90 seconds.</p>
+  <table>
+    <tr><th>Field</th><th>Required</th><th>Description</th></tr>
+    <tr><td><code>planId</code></td><td>yes</td><td>From <code>GET /plans</code>.</td></tr>
+    <tr><td><code>reference</code></td><td>yes</td><td>Your unique order id (letters, numbers, <code>. _ : -</code>, max 64). Sending the same reference again never creates a second order; it returns the first result.</td></tr>
+    <tr><td><code>expectedPricePHP</code></td><td>no</td><td>If set and the price has changed, the order is refused (409) instead of charging a different amount.</td></tr>
+    <tr><td><code>customerName</code>, <code>customerEmail</code></td><td>no</td><td>For your records and our support team.</td></tr>
+  </table>
+<pre><code>curl -X POST https://3ukph.com/partner/v1/orders \
+  -H "Authorization: Bearer YOUR_API_KEY" -H "Content-Type: application/json" \
+  -d '{ "planId": "pl_3f9a1c2b7d10", "reference": "TH-100045", "expectedPricePHP": 361,
+        "customerName": "Juan Dela Cruz" }'
+
+201 Created
+{ "reference": "TH-100045", "planId": "pl_3f9a1c2b7d10", "plan": "10GB eSIM Data for 7 Days for Japan",
+  "pricePHP": 361, "status": "completed", "walletBalancePHP": 4639,
+  "esim": { "iccid": "8910300000000000000", "lpa": "LPA:1$smdp.example.com$ABC123",
+            "smdpAddress": "smdp.example.com", "activationCode": "ABC123",
+            "qrCodePng": "data:image/png;base64,iVBORw0...",
+            "dataUsageUrl": "https://3ukph.com/data?iccid=8910300000000000000" } }</code></pre>
+  <table>
+    <tr><th><code>status</code></th><th>Meaning</th></tr>
+    <tr><td><code>completed</code></td><td>The eSIM is ready. Send the QR code to your guest.</td></tr>
+    <tr><td><code>processing</code></td><td>The eSIM was issued but the QR details were not returned yet. Our team sends them shortly; check <code>GET /orders/{reference}</code>.</td></tr>
+    <tr><td><code>failed</code></td><td>Not issued. The amount was refunded to your wallet automatically (<code>refunded: true</code>).</td></tr>
+  </table>
+
+  <h3><span class="m get">GET</span>/orders/{reference}</h3>
+  <p>Returns a saved order, including the eSIM details. Use it if your request timed out, before retrying.</p>
+
+  <h3><span class="m get">GET</span>/esims/{iccid}/usage</h3>
+  <p>Data used and remaining for an eSIM ordered through your account.</p>
+</section>
+
+<section>
+  <h2>Errors</h2>
+  <table>
+    <tr><th>HTTP</th><th>When</th></tr>
+    <tr><td>400</td><td>Missing or invalid field (for example an unknown <code>planId</code>).</td></tr>
+    <tr><td>401 / 403</td><td>Wrong API key, or the partner account is not active.</td></tr>
+    <tr><td>402</td><td>Not enough wallet balance. Nothing was charged.</td></tr>
+    <tr><td>409</td><td>Price changed, plan unavailable, or the same order is already processing.</td></tr>
+    <tr><td>429</td><td>Too many requests or the daily order limit was reached.</td></tr>
+    <tr><td>5xx</td><td>Temporary problem. Check <code>GET /orders/{reference}</code> before retrying.</td></tr>
+  </table>
+  <p>Every error body is <code>{ "error": "message" }</code>.</p>
+</section>
+
+<section>
+  <h2>Installing the eSIM</h2>
+  <p>Guests should install the eSIM before travelling, while on Wi-Fi: scan the QR code in Settings › Mobile/Cellular › Add eSIM, or enter <code>smdpAddress</code> and <code>activationCode</code> manually. At the destination they turn on the eSIM line and data roaming. The phone must be eSIM-compatible and network-unlocked.</p>
+</section>
+
+<section>
+  <h2>Support</h2>
+  <p>WhatsApp <b>+63 934 706 9356</b> (24/7) · <a href="mailto:admin@3ukph.com">admin@3ukph.com</a> · <a href="https://3ukph.com">3ukph.com</a></p>
+</section>
+</main>
+</body>
+</html>

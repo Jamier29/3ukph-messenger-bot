@@ -1986,6 +1986,213 @@ app.get("/admin/api/partner-sheet", requireAdmin, async (req, res) => {
   }
 });
 
+// =====================================================================
+// PARTNER API (v1): lets a partner's website order eSIMs automatically.
+// Auth: "Authorization: Bearer <key>" (or "x-api-key"). Keys are created in
+// the Admin Console (Wallet card -> API access); only a SHA-256 hash is stored.
+// Orders are paid from the partner's prepaid wallet, at their reseller price.
+// Safety: never sells below cost, wallet must cover the order, a daily order
+// limit per partner (PARTNER_API_DAILY_MAX, default 50), idempotent by
+// "reference", and a failed purchase is refunded to the wallet automatically.
+// Docs for the partner's developer: https://3ukph.com/partner/docs
+// =====================================================================
+const PARTNER_API_DAILY_MAX = Number(process.env.PARTNER_API_DAILY_MAX) || 50;
+const partnerMem = { keys: new Map(), byPsid: new Map(), orders: new Map(), iccids: new Map(), daily: new Map() };
+const partnerLocks = new Set();
+const partnerRate = new Map(); // keyHash -> { minute, count }
+const sha256 = (s) => crypto.createHash("sha256").update(String(s)).digest("hex");
+async function pGet(key, memMap, memKey) {
+  if (!UPSTASH_URL || !UPSTASH_TOKEN) return memMap.get(memKey) || null;
+  const v = await redis(["GET", key]);
+  try { return v ? JSON.parse(v) : null; } catch { return null; }
+}
+async function pSet(key, val, memMap, memKey) {
+  if (!UPSTASH_URL || !UPSTASH_TOKEN) { memMap.set(memKey, val); return; }
+  await redis(["SET", key, JSON.stringify(val)]);
+}
+async function pDel(key, memMap, memKey) {
+  if (!UPSTASH_URL || !UPSTASH_TOKEN) { memMap.delete(memKey); return; }
+  await redis(["DEL", key]);
+}
+
+// Stable plan ids (the catalog's P123 ids can change when prices are re-synced).
+function apiPlanId(p) { return "pl_" + sha256(`${p.destination}|${p.name}|${p.validityDays}`).slice(0, 12); }
+let apiPlanIndex = { at: 0, map: new Map() };
+function planByApiId(id) {
+  if (Date.now() - apiPlanIndex.at > 60000) apiPlanIndex = { at: Date.now(), map: new Map(allPlans().map((p) => [apiPlanId(p), p])) };
+  return apiPlanIndex.map.get(String(id || "")) || null;
+}
+function apiPlanView(p, tier) {
+  const r = reseller.resellerPrice(p, tier, getRate());
+  if (!r) return null;
+  return {
+    planId: apiPlanId(p), destination: p.destination, type: p.scope === "country" ? "country" : (p.scope || "regional"),
+    name: p.name, data: p.unlimited ? "Unlimited" : p.data, unlimited: !!p.unlimited, validityDays: p.validityDays,
+    countries: p.scope === "country" ? [p.destination] : (p.countries || []),
+    suggestedRetailPHP: Math.round(p.retailPrice * getRate() * 100) / 100, pricePHP: r.pricePHP
+  };
+}
+
+async function partnerAuth(req, res, next) {
+  try {
+    const h = String(req.get("authorization") || "");
+    const key = (h.toLowerCase().startsWith("bearer ") ? h.slice(7) : req.get("x-api-key") || "").trim();
+    if (!/^3ukp_[a-f0-9]{40}$/.test(key)) return res.status(401).json({ error: "Missing or invalid API key." });
+    const hash = sha256(key);
+    const rec = await pGet(`partner:key:${hash}`, partnerMem.keys, hash);
+    if (!rec || !rec.psid) return res.status(401).json({ error: "Missing or invalid API key." });
+    const member = await reseller.getMember(rec.psid);
+    if (!member) return res.status(403).json({ error: "This partner account is not active. Please contact 3UK Philippines." });
+    const minute = Math.floor(Date.now() / 60000), rl = partnerRate.get(hash);
+    if (rl && rl.minute === minute && rl.count >= 60) return res.status(429).json({ error: "Too many requests. Max 60 per minute." });
+    partnerRate.set(hash, rl && rl.minute === minute ? { minute, count: rl.count + 1 } : { minute, count: 1 });
+    req.partner = { psid: rec.psid, name: member.name || rec.name || rec.psid, tier: member.tier };
+    next();
+  } catch (e) { console.error("[partner-api] auth:", e.message); res.status(500).json({ error: "Server error. Please try again." }); }
+}
+
+// Buys the eSIM for a plan without messaging anyone. Same safety checks as deliverEsim.
+async function buyEsimForPlan(p, paidPHP) {
+  if (!esims.configured()) throw deliverError(503, "Ordering is temporarily unavailable.");
+  const pkg = await esims.findPackage(p.name, { retailUSD: p.retailPrice, costUSD: reseller.costOf(p) });
+  if (pkg && pkg.loading) throw deliverError(503, "Plans are still loading. Please try again in a few minutes.");
+  if (!pkg || pkg.ambiguous) throw deliverError(409, "This plan can't be ordered automatically right now. Please contact us on WhatsApp.");
+  let costUSD = pkg.price;
+  try {
+    const live = await esims.packageDetail(pkg.id);
+    if (live.name && live.name.toLowerCase() !== p.name.toLowerCase()) throw deliverError(409, "This plan changed at our supplier. Please contact us on WhatsApp.");
+    if (live.price && pkg.price && live.price > pkg.price * 1.1) throw deliverError(409, "The price of this plan changed. Please contact us on WhatsApp.");
+    if (live.price) costUSD = live.price;
+  } catch (e) { if (e.status) throw e; console.error("[partner-api] detail check skipped:", e.message); }
+  if (costUSD && costUSD * getRate() > paidPHP) throw deliverError(409, "The price of this plan changed. Please contact us on WhatsApp.");
+  let sim;
+  try { sim = await esims.purchase(pkg.id); }
+  catch (e) { throw deliverError(502, "The eSIM could not be issued: " + e.message); }
+  return { sim, costUSD };
+}
+
+const apiOrderPublic = (o) => { const x = { ...o }; delete x.psid; return x; };
+
+// --- Partner endpoints ---
+app.get("/partner/v1/me", partnerAuth, async (req, res) => {
+  res.json({ partner: req.partner.name, tier: req.partner.tier === "gold" ? "partner_plus" : "partner", walletBalancePHP: await reseller.getBalance(req.partner.psid), dailyOrderLimit: PARTNER_API_DAILY_MAX });
+});
+
+app.get("/partner/v1/plans", partnerAuth, (req, res) => {
+  const dest = String(req.query.destination || "").trim().toLowerCase();
+  const type = String(req.query.type || "").trim().toLowerCase();
+  let list = allPlans().filter((p) => !p.voiceSms && p.retailPrice > 0);
+  if (dest) list = list.filter((p) => p.destination.toLowerCase() === dest || (p.countries || []).some((c) => c.toLowerCase() === dest));
+  if (type === "country") list = list.filter((p) => p.scope === "country");
+  else if (type) list = list.filter((p) => p.scope !== "country");
+  const plans = list.map((p) => apiPlanView(p, req.partner.tier)).filter(Boolean);
+  res.json({ currency: "PHP", count: plans.length, plans });
+});
+
+app.get("/partner/v1/orders/:reference", partnerAuth, async (req, res) => {
+  const ref = String(req.params.reference || "").slice(0, 64);
+  const o = await pGet(`partner:order:${req.partner.psid}:${ref}`, partnerMem.orders, `${req.partner.psid}:${ref}`);
+  if (!o) return res.status(404).json({ error: "No order with this reference." });
+  res.json(apiOrderPublic(o));
+});
+
+app.post("/partner/v1/orders", partnerAuth, async (req, res) => {
+  const { psid, name, tier } = req.partner;
+  const b = req.body || {};
+  const ref = String(b.reference || "").trim();
+  if (!/^[A-Za-z0-9._:-]{1,64}$/.test(ref)) return res.status(400).json({ error: "\"reference\" is required: your own unique order id (letters, numbers, . _ : -, max 64)." });
+  const okey = `${psid}:${ref}`;
+  const existing = await pGet(`partner:order:${okey}`, partnerMem.orders, okey);
+  if (existing) return res.status(existing.status === "failed" ? 409 : 200).json({ ...apiOrderPublic(existing), duplicate: true });
+  const p = planByApiId(b.planId);
+  if (!p) return res.status(400).json({ error: "Unknown planId. Get the current plan list from GET /partner/v1/plans." });
+  const view = apiPlanView(p, tier);
+  if (!view) return res.status(409).json({ error: "This plan isn't available for partner ordering right now." });
+  if (b.expectedPricePHP != null && Math.abs(Number(b.expectedPricePHP) - view.pricePHP) > 0.009) return res.status(409).json({ error: `The price changed to PHP ${view.pricePHP.toFixed(2)}. Refresh your plan list.`, pricePHP: view.pricePHP });
+  if (partnerLocks.has(okey)) return res.status(409).json({ error: "This order is already being processed." });
+  const day = new Date().toISOString().slice(0, 10), dkey = `partner:daily:${psid}:${day}`;
+  let count;
+  if (UPSTASH_URL && UPSTASH_TOKEN) { count = Number(await redis(["INCR", dkey])); if (count === 1) await redis(["EXPIRE", dkey, 172800]); }
+  else { count = (partnerMem.daily.get(dkey) || 0) + 1; partnerMem.daily.set(dkey, count); }
+  if (count > PARTNER_API_DAILY_MAX) return res.status(429).json({ error: `Daily order limit (${PARTNER_API_DAILY_MAX}) reached. Contact us to raise it.` });
+
+  partnerLocks.add(okey);
+  const guest = String(b.customerName || "").slice(0, 80), email = String(b.customerEmail || "").slice(0, 120);
+  const base = { reference: ref, planId: view.planId, plan: p.name, pricePHP: view.pricePHP, customerName: guest || null, customerEmail: email || null, createdAt: new Date().toISOString() };
+  try {
+    const w = await reseller.walletOrder(psid, { pricePHP: view.pricePHP, plan: `${p.name} (API ${ref})`, retailPHP: view.suggestedRetailPHP, email });
+    if (!w.ok) {
+      return res.status(402).json({ error: `Not enough wallet balance. Order costs PHP ${view.pricePHP.toFixed(2)}, balance is PHP ${Number(w.balance).toFixed(2)}. Please top up.`, walletBalancePHP: w.balance });
+    }
+    let bought;
+    try { bought = await buyEsimForPlan(p, view.pricePHP); }
+    catch (e) {
+      const back = await reseller.walletTransaction(psid, { type: "refund", amountPHP: view.pricePHP, note: `API order ${ref} not issued: ${e.message}`.slice(0, 200), by: "partner-api" });
+      const failed = { ...base, psid, status: "failed", error: e.message, refunded: true, walletBalancePHP: back.balance };
+      await pSet(`partner:order:${okey}`, failed, partnerMem.orders, okey);
+      notifyAdmin({ title: "Partner API order failed (refunded)", message: `${name}\n${p.name}\nRef ${ref}\n${e.message}`, tags: "warning" }).catch(() => {});
+      return res.status(e.status || 502).json(apiOrderPublic(failed));
+    }
+    const sim = bought.sim;
+    const esim = {
+      iccid: sim.iccid || null, lpa: sim.lpa || null, smdpAddress: sim.smdp || null, activationCode: sim.matching || null,
+      qrCodePng: sim.lpa ? "data:image/png;base64," + (await QRCode.toBuffer(sim.lpa, { width: 600, margin: 2, errorCorrectionLevel: "M" })).toString("base64") : null,
+      dataUsageUrl: sim.iccid ? `https://3ukph.com/data?iccid=${sim.iccid}` : null
+    };
+    const done = { ...base, psid, status: sim.lpa || sim.iccid ? "completed" : "processing", walletBalancePHP: w.balance, esim,
+      ...(sim.lpa || sim.iccid ? {} : { note: "The eSIM was issued; the QR details will be sent by our team shortly." }) };
+    await pSet(`partner:order:${okey}`, done, partnerMem.orders, okey);
+    if (sim.iccid) {
+      await pSet(`partner:iccid:${sim.iccid}`, { psid, reference: ref }, partnerMem.iccids, sim.iccid).catch(() => {});
+      esims.addEsim(psid, { iccid: sim.iccid, plan: p.name, email, note: `Partner API ${ref}${guest ? " · " + guest : ""}` }).catch(() => {});
+    }
+    notifyAdmin({ title: done.status === "completed" ? "Partner API order ✅" : "Partner API order: QR missing ⚠️", message: `${name}\n${p.name}\n₱${view.pricePHP.toFixed(2)} from wallet (left ₱${Number(w.balance).toFixed(2)})\nRef ${ref}${sim.iccid ? "\nICCID " + sim.iccid : ""}${bought.costUSD ? `\nCost $${Number(bought.costUSD).toFixed(2)}` : ""}`, tags: done.status === "completed" ? "white_check_mark" : "warning", priority: done.status === "completed" ? undefined : "high" }).catch(() => {});
+    res.status(201).json(apiOrderPublic(done));
+  } catch (e) {
+    console.error("[partner-api] order:", e);
+    res.status(500).json({ error: "Server error. Check GET /partner/v1/orders/" + ref + " before retrying." });
+  } finally { partnerLocks.delete(okey); }
+});
+
+app.get("/partner/v1/esims/:iccid/usage", partnerAuth, async (req, res) => {
+  const ic = String(req.params.iccid || "").replace(/\D/g, "");
+  const own = await pGet(`partner:iccid:${ic}`, partnerMem.iccids, ic);
+  if (!own || own.psid !== req.partner.psid) return res.status(404).json({ error: "No eSIM with this ICCID on your account." });
+  try { const u = await esims.usage(ic); delete u.raw; delete u.details; res.json(u); }
+  catch (e) { res.status(502).json({ error: "Data usage is not available right now. Try again later." }); }
+});
+
+app.use("/partner/v1", (req, res) => res.status(404).json({ error: "Not found. See https://3ukph.com/partner/docs" }));
+app.get("/partner/docs", (req, res) => res.sendFile(path.join(__dirname, "public", "partner-docs.html")));
+
+// --- Admin: create / revoke a partner's API key ---
+app.get("/admin/api/partner-key", requireAdmin, async (req, res) => {
+  const psid = String(req.query.psid || "");
+  const rec = await pGet(`partner:bypsid:${psid}`, partnerMem.byPsid, psid);
+  res.json(rec ? { active: true, last4: rec.last4, createdAt: rec.createdAt } : { active: false });
+});
+app.post("/admin/api/partner-key", requireAdmin, async (req, res) => {
+  try {
+    const psid = String((req.body || {}).psid || "");
+    const member = await reseller.getMember(psid);
+    if (!member) return res.status(400).json({ error: "Approve this customer as a reseller first." });
+    const old = await pGet(`partner:bypsid:${psid}`, partnerMem.byPsid, psid);
+    if (old && old.hash) await pDel(`partner:key:${old.hash}`, partnerMem.keys, old.hash);
+    const key = "3ukp_" + crypto.randomBytes(20).toString("hex");
+    const hash = sha256(key), createdAt = new Date().toISOString();
+    await pSet(`partner:key:${hash}`, { psid, name: member.name || psid, createdAt }, partnerMem.keys, hash);
+    await pSet(`partner:bypsid:${psid}`, { hash, last4: key.slice(-4), createdAt }, partnerMem.byPsid, psid);
+    res.json({ key, last4: key.slice(-4), createdAt, replaced: !!old });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post("/admin/api/partner-key/revoke", requireAdmin, async (req, res) => {
+  const psid = String((req.body || {}).psid || "");
+  const old = await pGet(`partner:bypsid:${psid}`, partnerMem.byPsid, psid);
+  if (old && old.hash) await pDel(`partner:key:${old.hash}`, partnerMem.keys, old.hash);
+  await pDel(`partner:bypsid:${psid}`, partnerMem.byPsid, psid);
+  res.json({ ok: true });
+});
+
 app.get("/admin/api/esims", requireAdmin, async (req, res) => {
   const psid = String(req.query.psid || "");
   if (!/^(wa)?\d+$/.test(psid)) return res.status(400).json({ error: "Bad id." });
