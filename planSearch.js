@@ -328,4 +328,7 @@ function findPlansByText(q, limit = 15) {
 
 function countryNames() { return [...new Set(PLANS.filter((p) => p.scope === "country").map((p) => p.destination))]; }
 
-module.exports = { countryNames, searchMultiCountryPlans, findPlansByText, getRawPlan, regionSummaries, searchPlans, getPlan, listAllDestinations, getRate, getCatalogInfo, headlinePrices, setCatalog, formatPHP, toPHP };
+// All catalog plans (read-only use, e.g. the partner rate sheet).
+function allPlans() { return PLANS; }
+
+module.exports = { allPlans, countryNames, searchMultiCountryPlans, findPlansByText, getRawPlan, regionSummaries, searchPlans, getPlan, listAllDestinations, getRate, getCatalogInfo, headlinePrices, setCatalog, formatPHP, toPHP };

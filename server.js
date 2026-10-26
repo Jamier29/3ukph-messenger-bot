@@ -12,7 +12,7 @@ const fs = require("fs");
 const path = require("path");
 const express = require("express");
 const { BUSINESS_INFO } = require("./business-info");
-const { searchMultiCountryPlans, findPlansByText, getRawPlan, searchPlans, getPlan, listAllDestinations, getRate, headlinePrices, regionSummaries, formatPHP } = require("./planSearch");
+const { allPlans, searchMultiCountryPlans, findPlansByText, getRawPlan, searchPlans, getPlan, listAllDestinations, getRate, headlinePrices, regionSummaries, formatPHP } = require("./planSearch");
 const QRCode = require("qrcode");
 const { brandedQr } = require("./qrcard");
 const { startPriceSync, syncPrices, getSyncStatus } = require("./priceSync");
@@ -1862,6 +1862,130 @@ app.post("/admin/api/reseller-costs", requireAdmin, express.raw({ type: "*/*", l
 });
 
 // --- eSIM records per customer (permanent) + live usage ---
+// ---------------------------------------------------------------------
+// Partner rate sheet (Excel) for travel agencies, built from the same
+// reseller prices the bot charges (cost + markup), so the sheet always
+// matches what partners pay when they order. Cost is never in the file.
+//   GET /admin/api/partner-sheet?scope=asia|all
+// ---------------------------------------------------------------------
+const ASIA_COUNTRIES = ["Japan", "South Korea", "China", "Hong Kong", "Macau", "Taiwan", "Singapore", "Thailand", "Vietnam",
+  "Malaysia", "Indonesia", "Cambodia", "Laos", "Myanmar", "Brunei", "India", "Sri Lanka", "Nepal", "Bangladesh", "Maldives",
+  "Mongolia", "Pakistan", "Uzbekistan", "Kazakhstan", "Kyrgyzstan"];
+function gbSortKey(d) { if (/unlimited/i.test(d)) return 1e6; const m = String(d).match(/([\d.]+)\s*(GB|MB)/i); return m ? (m[2].toUpperCase() === "MB" ? +m[1] / 1024 : +m[1]) : 0; }
+app.get("/admin/api/partner-sheet", requireAdmin, async (req, res) => {
+  try {
+    const scope = String(req.query.scope || "asia").toLowerCase() === "all" ? "all" : "asia";
+    const rate = getRate();
+    const rowFor = (p) => {
+      const st = reseller.resellerPrice(p, "starter", rate);
+      if (!st) return null;
+      const gd = reseller.resellerPrice(p, "gold", rate) || st;
+      const label = p.unlimited ? (/plus/i.test(p.name) ? "Unlimited Plus" : "Unlimited") : p.data;
+      return { dest: p.destination, data: label, days: p.validityDays, retail: Math.round(p.retailPrice * rate * 100) / 100, partner: st.pricePHP, plus: gd.pricePHP, sortGb: gbSortKey(label), countries: p.countries || [] };
+    };
+    const plans = allPlans().filter((p) => !p.voiceSms && p.retailPrice > 0);
+    const sortRows = (a, b) => a.dest.localeCompare(b.dest) || a.sortGb - b.sortGb || a.days - b.days;
+    const countryRows = plans.filter((p) => p.scope === "country" && (scope === "all" || ASIA_COUNTRIES.includes(p.destination)))
+      .map(rowFor).filter(Boolean)
+      .sort((a, b) => scope === "asia" ? (ASIA_COUNTRIES.indexOf(a.dest) - ASIA_COUNTRIES.indexOf(b.dest) || a.sortGb - b.sortGb || a.days - b.days) : sortRows(a, b));
+    const regionalRows = plans.filter((p) => p.scope !== "country" && (scope === "all" || /asia/i.test(p.destination))).map(rowFor).filter(Boolean).sort(sortRows);
+    if (!countryRows.length && !regionalRows.length) return res.status(400).json({ error: "No reseller prices yet. Upload the eSIMCard reseller_pricing file first (Reseller prices)." });
+
+    const wb = new ExcelJS.Workbook();
+    const NAVY = "FF1E3A8A", RED = "FFC8102E", LIGHT = "FFEEF2FF";
+    const font = (o) => Object.assign({ name: "Arial", size: 10 }, o || {});
+    const today = new Date();
+    const until = new Date(today.getFullYear(), today.getMonth() + 1, 0).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+    const title = scope === "asia" ? "Asia" : "All destinations";
+
+    const about = wb.addWorksheet("About & How to Order", { views: [{ showGridLines: false }] });
+    about.getColumn(1).width = 3; about.getColumn(2).width = 26; about.getColumn(3).width = 90;
+    about.getCell("B2").value = "3UK Philippines"; about.getCell("B2").font = font({ size: 20, bold: true, color: { argb: NAVY } });
+    about.getCell("B3").value = `Partner Rate Sheet · ${title} · prices in Philippine pesos (PHP)`; about.getCell("B3").font = font({ size: 12, italic: true });
+    const info = [
+      ["Who we are", "DTI- and BIR-registered eSIM provider based in Taguig City, Metro Manila. Data plans for 190+ countries."],
+      ["Contact", "Jamier Labrador, Owner · WhatsApp +63 934 706 9356 (24/7 ordering) · admin@3ukph.com · 3ukph.com"],
+      ["", ""], ["PARTNER TIERS", ""],
+      ["Partner", "Free to join. Pay per order. See column 'Partner Price'."],
+      ["Partner Plus", "Lower prices for partners who keep a prepaid wallet of PHP 5,000 or more. See column 'Partner Plus Price'."],
+      ["", ""], ["HOW TO ORDER", ""],
+      ["1. Register", "Message our WhatsApp +63 934 706 9356: 'Partner registration – [agency name]'. We activate partner pricing on your number."],
+      ["2. Order", "Send the destination, data and days, or a whole tour group list. Our assistant replies 24/7 with your partner price."],
+      ["3. Pay", "GCash, Maya, QR Ph (any Philippine bank or e-wallet) or bank transfer."],
+      ["4. Receive", "eSIM QR codes are delivered automatically within minutes of payment, one per guest, ready to forward."],
+      ["", ""], ["NOTES", ""],
+      ["Country plans", "One eSIM for one country. Best for single-destination tours."],
+      ["Asia Regional plans", "One eSIM that works in all the countries listed on the 'Regional coverage' tab. Best for multi-country tours."],
+      ["Unlimited", "Unlimited plans may slow down after a daily high-speed allowance (fair use)."],
+      ["Validity", `Prices valid until ${until} and subject to supplier changes. The price confirmed in WhatsApp at the time of order applies.`],
+      ["Your profit", "'Your Profit' compares the partner price with our suggested retail price. You are free to set your own selling price."],
+      ["Compatibility", "Guests need an eSIM-compatible, network-unlocked phone. Install before the trip while on Wi-Fi."],
+    ];
+    info.forEach(([k, v], i) => {
+      const r = 5 + i; const a = about.getCell(r, 2), b = about.getCell(r, 3);
+      a.value = k; b.value = v; b.alignment = { wrapText: true, vertical: "top" }; a.alignment = { vertical: "top" };
+      if (k && k === k.toUpperCase() && /[A-Z]/.test(k) && !/^\d/.test(k)) {
+        [a, b].forEach((c) => { c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY } }; });
+        a.font = font({ bold: true, size: 11, color: { argb: "FFFFFFFF" } });
+      } else { a.font = font({ bold: true, color: { argb: NAVY } }); b.font = font(); }
+    });
+
+    const addTable = (name, rows) => {
+      if (!rows.length) return;
+      const ws = wb.addWorksheet(name, { views: [{ state: "frozen", xSplit: 1, ySplit: 3 }] });
+      ws.getCell("A1").value = `3UK Philippines · ${name} · partner rates in PHP (valid until ${until})`;
+      ws.getCell("A1").font = font({ bold: true, size: 13, color: { argb: NAVY } });
+      const hdr = ["Destination", "Data", "Validity (days)", "Suggested Retail (PHP)", "Partner Price (PHP)", "Your Profit (PHP)", "Profit %", "Partner Plus Price (PHP)", "Your Profit – Plus (PHP)"];
+      const widths = [20, 14, 10, 16, 15, 14, 10, 16, 16];
+      hdr.forEach((h, i) => {
+        const c = ws.getCell(3, i + 1); c.value = h; ws.getColumn(i + 1).width = widths[i];
+        c.font = font({ bold: true, color: { argb: "FFFFFFFF" } }); c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY } };
+        c.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+      });
+      ws.getRow(3).height = 32;
+      rows.forEach((x, i) => {
+        const r = 4 + i;
+        const vals = [x.dest, x.data, x.days, x.retail, x.partner,
+          { formula: `D${r}-E${r}`, result: Math.round((x.retail - x.partner) * 100) / 100 },
+          { formula: `IF(D${r}=0,0,F${r}/D${r})`, result: x.retail ? (x.retail - x.partner) / x.retail : 0 },
+          x.plus, { formula: `D${r}-H${r}`, result: Math.round((x.retail - x.plus) * 100) / 100 }];
+        vals.forEach((v, j) => {
+          const c = ws.getCell(r, j + 1); c.value = v; c.font = font(j === 4 ? { bold: true, color: { argb: RED } } : {});
+          if ([3, 4, 5, 7, 8].includes(j)) c.numFmt = "#,##0.00";
+          if (j === 6) c.numFmt = "0.0%";
+          if ([1, 2, 6].includes(j)) c.alignment = { horizontal: "center" };
+          if (i % 2) c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: LIGHT } };
+        });
+      });
+      ws.autoFilter = { from: "A3", to: `I${3 + rows.length}` };
+    };
+    addTable(scope === "asia" ? "Asia Countries" : "Country Plans", countryRows);
+    addTable(scope === "asia" ? "Asia Regional" : "Regional & Global Plans", regionalRows);
+
+    if (regionalRows.length) {
+      const cov = wb.addWorksheet("Regional coverage");
+      cov.getColumn(1).width = 26; cov.getColumn(2).width = 110;
+      cov.getCell("A1").value = "Countries covered by each regional plan"; cov.getCell("A1").font = font({ bold: true, size: 13, color: { argb: NAVY } });
+      const seen = new Map();
+      regionalRows.forEach((x) => { const k = x.dest + "|" + x.countries.join(","); if (!seen.has(k)) seen.set(k, x); });
+      let r = 3;
+      for (const x of seen.values()) {
+        cov.getCell(r, 1).value = `${x.dest} (${x.countries.length} countries)`; cov.getCell(r, 1).font = font({ bold: true, color: { argb: NAVY } });
+        cov.getCell(r, 2).value = x.countries.join(", "); cov.getCell(r, 2).font = font(); cov.getCell(r, 2).alignment = { wrapText: true, vertical: "top" };
+        cov.getCell(r, 1).alignment = { vertical: "top" }; r++;
+      }
+    }
+
+    const buf = await wb.xlsx.writeBuffer();
+    const fname = `3UK-Philippines-Partner-Rates-${scope === "asia" ? "Asia" : "All"}-${today.toISOString().slice(0, 10)}.xlsx`;
+    res.set({ "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Content-Disposition": `attachment; filename="${fname}"` });
+    res.send(Buffer.from(buf));
+  } catch (err) {
+    console.error("[partner-sheet]", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get("/admin/api/esims", requireAdmin, async (req, res) => {
   const psid = String(req.query.psid || "");
   if (!/^(wa)?\d+$/.test(psid)) return res.status(400).json({ error: "Bad id." });

@@ -250,6 +250,10 @@
       <h2 style="margin-top:16px">Approved resellers &amp; wallets</h2>
       <p class="help">Click a reseller to see their wallet, add a top-up, or refund an order. Wallet orders are deducted automatically; orders paid by GCash/bank are logged too.</p>
       <div id="memberList" class="help scrollbox">Loading…</div>
+      <h2 style="margin-top:16px">Partner rate sheet</h2>
+      <p class="help">Excel price list for travel agencies and partners, using the same reseller prices the bot charges. Your cost is never in the file.</p>
+      <div class="row"><button class="ghost" id="sheetAsiaBtn">⬇ Asia rate sheet (Excel)</button><button class="ghost" id="sheetAllBtn">⬇ All destinations (Excel)</button></div>
+      <div class="status" id="sheetStatus"></div>
       <div class="row" style="margin-top:8px"><button class="ghost" id="allCsvBtn" title="Download every reseller's purchases for Excel">⬇ Download all purchases (CSV)</button></div>
     </section>
 
@@ -792,6 +796,20 @@
   $("lookBtn").onclick = lookIccid;
   $("txBtn").onclick = saveTx;
   $("csvBtn").onclick = walletCsv;
+  function partnerSheet(scope) {
+    $("sheetStatus").className = "status"; $("sheetStatus").textContent = "Preparing the Excel file…";
+    fetch("/admin/api/partner-sheet?scope=" + scope, { headers: { "x-admin-key": key } }).then(function (r) {
+      if (!r.ok) return r.json().catch(function () { return {}; }).then(function (d) { throw new Error(d.error || ("Error " + r.status)); });
+      var name = ((r.headers.get("Content-Disposition") || "").match(/filename="([^"]+)"/) || [])[1] || ("3UK-Partner-Rates-" + scope + ".xlsx");
+      return r.blob().then(function (b) {
+        var a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = name; document.body.appendChild(a); a.click();
+        setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+        $("sheetStatus").className = "status ok"; $("sheetStatus").textContent = "✓ Downloaded " + name;
+      });
+    }).catch(function (e) { $("sheetStatus").className = "status err"; $("sheetStatus").textContent = e.message; });
+  }
+  $("sheetAsiaBtn").onclick = function () { partnerSheet("asia"); };
+  $("sheetAllBtn").onclick = function () { partnerSheet("all"); };
   $("allCsvBtn").onclick = allCsv;
   $("costsBtn").onclick = uploadCosts;
   // Installable app: register the service worker and offer an Install button.
