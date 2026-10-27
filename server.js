@@ -2214,6 +2214,19 @@ app.post("/admin/api/partner-key/revoke", requireAdmin, async (req, res) => {
   res.json({ ok: true });
 });
 
+// Sends a SAMPLE eSIM email (dummy QR, marked as a test) to check the email setup.
+app.post("/admin/api/test-email", requireAdmin, async (req, res) => {
+  const to = String((req.body || {}).to || "").trim();
+  if (!mailer.configured()) return res.status(400).json({ error: "RESEND_API_KEY is not set in Render." });
+  if (!mailer.validEmail(to)) return res.status(400).json({ error: "Enter a valid email address." });
+  try {
+    const png = brandedQr("LPA:1$TEST.3ukph.com$SAMPLE-NOT-A-REAL-ESIM", "8900000000000000000");
+    const r = await mailer.sendEsimEmail({ to, name: "", plan: "[TEST] 10GB eSIM Data for 7 Days for Japan", iccid: "8900000000000000000",
+      smdp: "TEST.3ukph.com", activationCode: "SAMPLE-NOT-A-REAL-ESIM", qrPng: png, amount: "₱421.20", method: "GCash (PayMongo)", reference: "3UK-TEST" });
+    res.json({ ok: true, ...r });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+
 app.get("/admin/api/esims", requireAdmin, async (req, res) => {
   const psid = String(req.query.psid || "");
   if (!/^(wa)?\d+$/.test(psid)) return res.status(400).json({ error: "Bad id." });
