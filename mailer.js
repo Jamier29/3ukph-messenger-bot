@@ -44,7 +44,7 @@ function buildHtml(d) {
     <p style="margin:0;font-size:15px;color:#374151;line-height:1.5">Hi${d.name ? " " + esc(d.name) : ""}, thank you for your order. Here is your <b>${esc(d.plan)}</b> eSIM. Keep this email: it has your QR code and receipt.</p>
   </td></tr>
   ${d.hasQr ? `<tr><td align="center" style="padding:18px 24px 6px">
-    <img src="cid:esimqr" width="280" alt="Your eSIM QR code" style="width:280px;max-width:100%;border:1px solid #e5e7eb;border-radius:12px;display:block">
+    <img src="${esc(d.qrUrl || "cid:esimqr")}" width="280" alt="Your eSIM QR code" style="width:280px;max-width:100%;border:1px solid #e5e7eb;border-radius:12px;display:block">
     <p style="margin:8px 0 0;font-size:12px;color:#6b7280">The QR code can usually be used only once. Don't delete the eSIM after installing it.</p>
   </td></tr>` : ""}
   <tr><td style="padding:16px 24px 4px">
@@ -95,7 +95,7 @@ function buildText(d) {
   ].filter((x) => x !== "").join("\n");
 }
 
-// d: { to, name, plan, iccid, lpa, smdp, activationCode, qrPng (Buffer), amount, method, reference, paidAt }
+// d: { to, name, plan, qrUrl, iccid, lpa, smdp, activationCode, qrPng (Buffer), amount, method, reference, paidAt }
 async function sendEsimEmail(d) {
   if (!configured()) return { skipped: "RESEND_API_KEY not set" };
   if (!validEmail(d.to)) return { skipped: "no valid email" };
@@ -104,7 +104,8 @@ async function sendEsimEmail(d) {
     from: FROM, to: [String(d.to).trim()], reply_to: REPLY_TO,
     subject: `Your eSIM is ready: ${d.plan} | 3UK Philippines`,
     html: buildHtml(data), text: buildText(data),
-    attachments: d.qrPng ? [{ filename: `3UK-eSIM-QR${d.iccid ? "-" + String(d.iccid).slice(-6) : ""}.png`, content: Buffer.from(d.qrPng).toString("base64"), content_id: "esimqr" }] : []
+    // The QR is shown from a hosted URL (works in every mail app) and also attached for download.
+    attachments: d.qrPng ? [{ filename: `3UK-eSIM-QR${d.iccid ? "-" + String(d.iccid).slice(-6) : ""}.png`, content: Buffer.from(d.qrPng).toString("base64"), ...(d.qrUrl ? {} : { content_id: "esimqr" }) }] : []
   };
   const r = await fetch("https://api.resend.com/emails", {
     method: "POST", headers: { Authorization: `Bearer ${API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify(body)

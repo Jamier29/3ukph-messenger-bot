@@ -1391,7 +1391,7 @@ async function deliverEsim(psid, planId, opts = {}) {
         const nm = await getCustomerName(psid).catch(() => "");
         await mailer.sendEsimEmail({
           to: emailTo, name: /^(Messenger user|wa)\b/.test(nm) ? "" : String(nm).replace(/\s*\(\+?\d+\)$/, "").split(" ")[0],
-          plan: plan.name, iccid: sim.iccid || null, smdp: sim.smdp || null, activationCode: sim.matching || null, qrPng: png,
+          plan: plan.name, iccid: sim.iccid || null, smdp: sim.smdp || null, activationCode: sim.matching || null, qrPng: png, qrUrl: await hostEmailQr(png).catch(() => null),
           amount: opts.paidPHP ? formatPHP(opts.paidPHP) : (order && order.price) || "",
           method: opts.method || (order && order.method) || "",
           reference: opts.reference || (order && order.reference) || ("3UK-" + Date.now().toString(36).toUpperCase()),
@@ -2214,6 +2214,25 @@ app.post("/admin/api/partner-key/revoke", requireAdmin, async (req, res) => {
   res.json({ ok: true });
 });
 
+// Hosted QR images for emails: /q/<random token>.png (kept 120 days). The token is unguessable.
+const mailQrMem = new Map();
+async function hostEmailQr(png) {
+  if (!png) return null;
+  const token = crypto.randomBytes(16).toString("hex");
+  const b64 = Buffer.from(png).toString("base64");
+  if (UPSTASH_URL && UPSTASH_TOKEN) await redis(["SET", `mailqr:${token}`, b64, "EX", 120 * 24 * 3600]);
+  else mailQrMem.set(token, b64);
+  return `${(process.env.PUBLIC_URL || "https://3ukph.com").replace(/\/$/, "")}/q/${token}.png`;
+}
+app.get("/q/:token.png", async (req, res) => {
+  const t = String(req.params.token || "");
+  if (!/^[a-f0-9]{32}$/.test(t)) return res.sendStatus(404);
+  const b64 = UPSTASH_URL && UPSTASH_TOKEN ? await redis(["GET", `mailqr:${t}`]).catch(() => null) : mailQrMem.get(t);
+  if (!b64) return res.sendStatus(404);
+  res.set({ "Content-Type": "image/png", "Cache-Control": "private, max-age=86400", "X-Robots-Tag": "noindex" });
+  res.send(Buffer.from(b64, "base64"));
+});
+
 // Sends a SAMPLE eSIM email (dummy QR, marked as a test) to check the email setup.
 app.post("/admin/api/test-email", requireAdmin, async (req, res) => {
   const to = String((req.body || {}).to || "").trim();
@@ -2222,7 +2241,7 @@ app.post("/admin/api/test-email", requireAdmin, async (req, res) => {
   try {
     const png = brandedQr("LPA:1$TEST.3ukph.com$SAMPLE-NOT-A-REAL-ESIM", "8900000000000000000");
     const r = await mailer.sendEsimEmail({ to, name: "", plan: "[TEST] 10GB eSIM Data for 7 Days for Japan", iccid: "8900000000000000000",
-      smdp: "TEST.3ukph.com", activationCode: "SAMPLE-NOT-A-REAL-ESIM", qrPng: png, amount: "₱421.20", method: "GCash (PayMongo)", reference: "3UK-TEST" });
+      smdp: "TEST.3ukph.com", activationCode: "SAMPLE-NOT-A-REAL-ESIM", qrPng: png, qrUrl: await hostEmailQr(png).catch(() => null), amount: "₱421.20", method: "GCash (PayMongo)", reference: "3UK-TEST" });
     res.json({ ok: true, ...r });
   } catch (e) { res.status(502).json({ error: e.message }); }
 });
