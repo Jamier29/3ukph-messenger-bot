@@ -23,6 +23,7 @@ const kit = require("./marketingKit");
 const pm = require("./paymongo");
 const { tripContext } = require("./tripAdvisor");
 const esims = require("./esimcard");
+const mailer = require("./mailer");
 
 const app = express();
 // Admin image uploads (QR codes) are bigger than normal requests.
@@ -1365,8 +1366,8 @@ async function deliverEsim(psid, planId, opts = {}) {
       throw deliverError(502, "The eSIM was bought, but eSIMCard didn't return the QR yet. Open eSIMCard > My eSIMs and send it manually (don't buy again).", { bought: true });
     }
     const steps = [];
+    let png = null;
     if (sim.lpa) {
-      let png;
       try { png = brandedQr(sim.lpa, sim.iccid); } // 3UK-branded card; falls back to a plain QR
       catch (e) { console.error("[deliver] branded QR failed:", e.message); png = await QRCode.toBuffer(sim.lpa, { width: 720, margin: 3, errorCorrectionLevel: "M" }); }
       await adminSendImage(psid, png, "image/png", `Your eSIM QR code: ${plan.name}`);
@@ -1383,6 +1384,26 @@ async function deliverEsim(psid, planId, opts = {}) {
     steps.push("text");
     if (opts.auto) pausedUntil.delete(psid); // automatic delivery: keep the AI assistant on for follow-up questions
     const order = await getLastOrder(psid);
+    // Branded email copy of the QR + receipt (if the customer gave an email and Resend is set up).
+    const emailTo = opts.email || (order && order.email) || "";
+    if (mailer.configured() && mailer.validEmail(emailTo)) {
+      try {
+        const nm = await getCustomerName(psid).catch(() => "");
+        await mailer.sendEsimEmail({
+          to: emailTo, name: /^(Messenger user|wa)\b/.test(nm) ? "" : String(nm).replace(/\s*\(\+?\d+\)$/, "").split(" ")[0],
+          plan: plan.name, iccid: sim.iccid || null, smdp: sim.smdp || null, activationCode: sim.matching || null, qrPng: png,
+          amount: opts.paidPHP ? formatPHP(opts.paidPHP) : (order && order.price) || "",
+          method: opts.method || (order && order.method) || "",
+          reference: opts.reference || (order && order.reference) || ("3UK-" + Date.now().toString(36).toUpperCase()),
+          paidAt: Date.now()
+        });
+        steps.push("email");
+        await adminSendText(psid, `📧 We also emailed your QR code and receipt to ${emailTo}. (Check Spam/Promotions if you don't see it.)`).catch(() => {});
+      } catch (e) {
+        console.error("[deliver] email failed:", e.message);
+        notifyAdmin({ title: "eSIM email not sent", message: `${emailTo}\n${plan.name}\n${e.message}`, tags: "warning" }).catch(() => {});
+      }
+    }
     if (sim.iccid) {
       try { await esims.addEsim(psid, { iccid: sim.iccid, plan: plan.name, email: (order && order.email) || "", note: opts.auto ? "Auto-delivered (PayMongo)" : "Auto-delivered" }); } catch (e) { console.error("[deliver] save ICCID:", e.message); }
     }
@@ -1502,7 +1523,7 @@ async function handlePaidCheckout(id, source) {
     try {
       await adminSendText(psid, `✅ Payment received (${formatPHP(order.pricePHP)}). Thank you! Preparing your eSIM now... ⏳`);
       told = true;
-      const r = await deliverEsim(psid, order.planId, { auto: true, paidPHP: order.pricePHP });
+      const r = await deliverEsim(psid, order.planId, { auto: true, paidPHP: order.pricePHP, reference: order.ref, method: order.method ? `${order.method} (PayMongo)` : "PayMongo", email: order.email });
       await pmUpdateOrder(id, { status: "delivered", deliveredAt: Date.now(), iccid: r.iccid || null, costUSD: r.costUSD || null });
     } catch (e) {
       console.error("[paymongo] auto-delivery failed:", e.message);
