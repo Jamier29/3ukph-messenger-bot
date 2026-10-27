@@ -2378,8 +2378,12 @@ async function handleMessagingEvent(event) {
     const sentByConsole = adminSentIds.has(message.mid);
     // Facebook's own Instant reply / away message (set in Meta Business Suite) also arrives
     // as an echo. It starts with AUTO_REPLY_PREFIX, so it must not pause the bot.
-    const autoReplyPrefix = (process.env.AUTO_REPLY_PREFIX || "Salamat sa message").toLowerCase();
-    const isFbAutoReply = !!message.text && message.text.trim().toLowerCase().startsWith(autoReplyPrefix);
+    // AUTO_REPLY_PREFIX may list several starts separated by "|".
+    const autoReplyPrefixes = (process.env.AUTO_REPLY_PREFIX || "Salamat sa message")
+      .split("|").concat(["Thank you for your message", "Thanks for your message", "Thanks for messaging", "Thank you for messaging", "Salamat sa pag-message", "Salamat po sa message"])
+      .map((x) => x.trim().toLowerCase()).filter(Boolean);
+    const echoText = String(message.text || "").trim().toLowerCase();
+    const isFbAutoReply = !!echoText && autoReplyPrefixes.some((p) => echoText.startsWith(p));
     if (isFbAutoReply) return;
     if (customerId && !sentByBot && !sentByConsole) {
       recordChat(customerId, true, message.text || "(attachment)", "admin");
