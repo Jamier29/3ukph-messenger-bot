@@ -1893,9 +1893,9 @@ const ASIA_COUNTRIES = ["Japan", "South Korea", "China", "Hong Kong", "Macau", "
   "Malaysia", "Indonesia", "Cambodia", "Laos", "Myanmar", "Brunei", "India", "Sri Lanka", "Nepal", "Bangladesh", "Maldives",
   "Mongolia", "Pakistan", "Uzbekistan", "Kazakhstan", "Kyrgyzstan"];
 function gbSortKey(d) { if (/unlimited/i.test(d)) return 1e6; const m = String(d).match(/([\d.]+)\s*(GB|MB)/i); return m ? (m[2].toUpperCase() === "MB" ? +m[1] / 1024 : +m[1]) : 0; }
-app.get("/admin/api/partner-sheet", requireAdmin, async (req, res) => {
-  try {
-    const scope = String(req.query.scope || "asia").toLowerCase() === "all" ? "all" : "asia";
+async function buildPartnerSheet(scopeIn) {
+  {
+    const scope = String(scopeIn || "asia").toLowerCase() === "all" ? "all" : "asia";
     const rate = getRate();
     const rowFor = (p) => {
       const st = reseller.resellerPrice(p, "starter", rate);
@@ -1910,7 +1910,7 @@ app.get("/admin/api/partner-sheet", requireAdmin, async (req, res) => {
       .map(rowFor).filter(Boolean)
       .sort((a, b) => scope === "asia" ? (ASIA_COUNTRIES.indexOf(a.dest) - ASIA_COUNTRIES.indexOf(b.dest) || a.sortGb - b.sortGb || a.days - b.days) : sortRows(a, b));
     const regionalRows = plans.filter((p) => p.scope !== "country" && (scope === "all" || /asia/i.test(p.destination))).map(rowFor).filter(Boolean).sort(sortRows);
-    if (!countryRows.length && !regionalRows.length) return res.status(400).json({ error: "No reseller prices yet. Upload the eSIMCard reseller_pricing file first (Reseller prices)." });
+    if (!countryRows.length && !regionalRows.length) { const e = new Error("No reseller prices yet. Upload the eSIMCard reseller_pricing file first (Reseller prices)."); e.status = 400; throw e; }
 
     const wb = new ExcelJS.Workbook();
     const NAVY = "FF1E3A8A", RED = "FFC8102E", LIGHT = "FFEEF2FF";
@@ -1999,12 +1999,31 @@ app.get("/admin/api/partner-sheet", requireAdmin, async (req, res) => {
 
     const buf = await wb.xlsx.writeBuffer();
     const fname = `3UK-Philippines-Partner-Rates-${scope === "asia" ? "Asia" : "All"}-${today.toISOString().slice(0, 10)}.xlsx`;
-    res.set({ "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Content-Disposition": `attachment; filename="${fname}"` });
-    res.send(Buffer.from(buf));
-  } catch (err) {
-    console.error("[partner-sheet]", err);
-    res.status(500).json({ error: err.message });
+    return { buf: Buffer.from(buf), fname };
   }
+}
+const XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+app.get("/admin/api/partner-sheet", requireAdmin, async (req, res) => {
+  try {
+    const { buf, fname } = await buildPartnerSheet(req.query.scope);
+    res.set({ "Content-Type": XLSX_TYPE, "Content-Disposition": `attachment; filename="${fname}"` });
+    res.send(buf);
+  } catch (err) { console.error("[partner-sheet]", err); res.status(err.status || 500).json({ error: err.message }); }
+});
+// Shareable download link for partners (always the current prices): /rates/<scope>/<signature>.xlsx
+function rateSheetSig(scope) { return crypto.createHmac("sha256", String(process.env.ADMIN_KEY || "") + "|rates").update(scope).digest("hex").slice(0, 24); }
+app.get("/admin/api/rate-sheet-link", requireAdmin, (req, res) => {
+  const scope = String(req.query.scope || "asia").toLowerCase() === "all" ? "all" : "asia";
+  res.json({ url: `${(process.env.PUBLIC_URL || "https://3ukph.com").replace(/\/$/, "")}/rates/${scope}/${rateSheetSig(scope)}.xlsx` });
+});
+app.get("/rates/:scope/:sig.xlsx", async (req, res) => {
+  const scope = req.params.scope === "all" ? "all" : req.params.scope === "asia" ? "asia" : null;
+  if (!scope || !process.env.ADMIN_KEY || req.params.sig !== rateSheetSig(scope)) return res.sendStatus(404);
+  try {
+    const { buf, fname } = await buildPartnerSheet(scope);
+    res.set({ "Content-Type": XLSX_TYPE, "Content-Disposition": `attachment; filename="${fname}"`, "X-Robots-Tag": "noindex" });
+    res.send(buf);
+  } catch (err) { res.status(err.status || 500).send("Rate sheet not available right now."); }
 });
 
 // =====================================================================
