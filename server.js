@@ -2707,6 +2707,7 @@ function encodeHeader(s) {
 
 // Best-effort customer name lookup for admin alerts.
 const nameCache = new Map();
+let profileApiWarned = false;
 async function getCustomerName(psid) {
   if (nameCache.has(psid)) return nameCache.get(psid);
   if (isWa(psid)) {
@@ -2725,9 +2726,27 @@ async function getCustomerName(psid) {
       const d = await res.json();
       const full = [d.first_name, d.last_name].filter(Boolean).join(" ");
       if (full) name = full;
+    } else if (!profileApiWarned) {
+      profileApiWarned = true;
+      const t = await res.text().catch(() => "");
+      console.warn(`[name] User Profile API refused (${res.status}); falling back to the Conversations API. ${t.slice(0, 200)}`);
     }
   } catch (_) { /* ignore */ }
-  nameCache.set(psid, name);
+  // Fallback: the Conversations API lists the participant's name and only needs
+  // the page token's messaging permissions (no extra profile-access feature).
+  if (/^Messenger user/.test(name)) {
+    try {
+      const res = await fetch(`https://graph.facebook.com/v21.0/me/conversations?platform=messenger&user_id=${encodeURIComponent(psid)}&fields=participants&access_token=${encodeURIComponent(PAGE_ACCESS_TOKEN)}`);
+      if (res.ok) {
+        const d = await res.json();
+        const parts = (d.data && d.data[0] && d.data[0].participants && d.data[0].participants.data) || [];
+        const me = parts.find((p) => String(p.id) === String(psid));
+        if (me && me.name) name = me.name;
+      }
+    } catch (_) { /* ignore */ }
+  }
+  // Don't cache a failed lookup forever: retry on a later message.
+  if (!/^Messenger user/.test(name)) nameCache.set(psid, name);
   return name;
 }
 
