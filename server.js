@@ -61,15 +61,16 @@ if (!VERIFY_TOKEN || !PAGE_ACCESS_TOKEN || !ANTHROPIC_API_KEY) {
 // The Send API needs a PAGE token. If PAGE_ACCESS_TOKEN holds a user or system-user
 // token by mistake, swap in the Page token derived from it, so the bot keeps working.
 const FB_PAGE_ID = (process.env.PAGE_ID || "103294518884622").trim();
+let pageTokenStatus = "checking";
 async function resolvePageToken() {
-  if (!PAGE_ACCESS_TOKEN) return;
+  if (!PAGE_ACCESS_TOKEN) { pageTokenStatus = "missing"; return; }
   const g = async (path) => {
     const r = await fetch(`https://graph.facebook.com/v21.0/${path}${path.includes("?") ? "&" : "?"}access_token=${encodeURIComponent(PAGE_ACCESS_TOKEN)}`);
     return { ok: r.ok, d: await r.json().catch(() => ({})) };
   };
   try {
     const me = await g("me?fields=id,name");
-    if (me.ok && String(me.d.id) === FB_PAGE_ID) { console.log(`[token] Page token OK (${me.d.name}).`); return; }
+    if (me.ok && String(me.d.id) === FB_PAGE_ID) { console.log(`[token] Page token OK (${me.d.name}).`); pageTokenStatus = "ok"; return; }
     console.warn(`[token] PAGE_ACCESS_TOKEN is not a Page token (it belongs to "${(me.d && me.d.name) || "unknown"}"). Looking up the Page token...`);
     let pageToken = null, pageName = "";
     const direct = await g(`${FB_PAGE_ID}?fields=access_token,name`);
@@ -81,11 +82,13 @@ async function resolvePageToken() {
     }
     if (pageToken) {
       PAGE_ACCESS_TOKEN = pageToken;
+      pageTokenStatus = "ok (auto-swapped to Page token)";
       console.log(`[token] Using the Page token for "${pageName}" derived from PAGE_ACCESS_TOKEN.`);
     } else {
+      pageTokenStatus = "FAILED: not a Page token";
       console.error("[token] Could not get a Page token. Give the token's system user access to the Page (Messages) and pages_messaging permission.", JSON.stringify(direct.d).slice(0, 300));
     }
-  } catch (err) { console.error("[token] check failed:", err.message); }
+  } catch (err) { pageTokenStatus = "check error"; console.error("[token] check failed:", err.message); }
 }
 resolvePageToken();
 if (!ADMIN_NTFY_TOPIC) {
@@ -2430,7 +2433,7 @@ app.post("/admin/api/resume-bot", requireAdmin, (req, res) => {
 
 // Health check for uptime monitoring
 app.get("/health", (req, res) => {
-  res.send(`3UKPH Messenger bot is running. Catalog: ${listAllDestinations().length} destinations loaded.`);
+  res.send(`3UKPH Messenger bot is running. Catalog: ${listAllDestinations().length} destinations loaded. Messenger token: ${pageTokenStatus}.`);
 });
 
 // ---------------------------------------------------------------------
