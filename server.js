@@ -334,6 +334,25 @@ function addResellerPrice(plan, member) {
   };
 }
 
+// Applicants (not yet approved) see a PREVIEW of the Starter reseller price and profit, so they
+// can picture their earnings. "price" stays the retail price: they can't buy at reseller price yet.
+function addProfitPreview(plan) {
+  if (!plan) return plan;
+  const r = reseller.resellerPrice(getRawPlan(plan.planId), "starter", getRate());
+  if (!r) return plan;
+  return { ...plan, previewStarterResellerPrice: formatPHP(r.pricePHP), previewStarterProfitPerSale: formatPHP(r.profitAtRetailPHP) };
+}
+async function getApplicantSafe(senderId) {
+  try { return await reseller.getApplicant(senderId); } catch (_) { return null; }
+}
+async function priceForViewer(plans, senderId) {
+  if (!Array.isArray(plans)) return plans;
+  const member = await getResellerSafe(senderId);
+  if (member) return plans.map((p) => addResellerPrice(p, member));
+  if (await getApplicantSafe(senderId)) return plans.map(addProfitPreview);
+  return plans;
+}
+
 const TOOLS = [
   {
     name: "search_esim_plans",
@@ -457,15 +476,13 @@ async function runTool(name, input, senderId) {
   switch (name) {
     case "search_esim_plans": {
       const result = searchPlans(input || {});
-      const member = await getResellerSafe(senderId);
-      if (member && Array.isArray(result.plans)) result.plans = result.plans.map((p) => addResellerPrice(p, member));
+      result.plans = await priceForViewer(result.plans, senderId);
       return result;
     }
 
     case "search_multi_country_plans": {
       const result = searchMultiCountryPlans(input || {});
-      const member = await getResellerSafe(senderId);
-      if (member && Array.isArray(result.plans)) result.plans = result.plans.map((p) => addResellerPrice(p, member));
+      result.plans = await priceForViewer(result.plans, senderId);
       return result;
     }
 
@@ -2571,6 +2588,7 @@ function alertClaudeFailure(err, senderId) {
 async function getClaudeReply(senderId, userText) {
   await loadHistory(senderId);
   const member = await getResellerSafe(senderId);
+  const applicant = member ? null : await getApplicantSafe(senderId);
   const kitUrl = member ? await kitLink(senderId).catch(() => null) : null;
   const resellerContext = member
     ? `\n\n--- THIS CHAT ---\nThe person you are chatting with is an APPROVED ${member.tier === "gold" ? "GOLD" : "STARTER"} RESELLER` +
@@ -2580,7 +2598,13 @@ async function getClaudeReply(senderId, userText) {
       `apply to reseller prices. This status is current and OVERRIDES anything said earlier in the conversation (e.g. an application ` +
       `that was pending); if a plan was quoted earlier, call get_plan again to get the reseller price before ordering.` + (member.tier === "gold" ? ` As a Gold reseller they can pay with paymentMethod "Wallet" (deducted from their prepaid wallet). Never refuse a Wallet payment yourself -- ` +
         `call create_order with paymentMethod "Wallet"; it checks the balance and tells you if it's too low.` : "")
-    : "\n\n--- THIS CHAT ---\nThis person is NOT an approved reseller. Never quote reseller prices or reseller discounts to them.";
+    : (applicant
+      ? "\n\n--- THIS CHAT ---\nThis person has APPLIED to be a Starter reseller and is waiting for approval" + (applicant.name ? ` (name: ${applicant.name})` : "") + ". " +
+        "In search results, \"price\" is still the retail price they would pay today, and each plan also shows previewStarterResellerPrice and " +
+        "previewStarterProfitPerSale. Whenever you list plans to them, show for EACH plan: retail price, their Starter reseller price, and their " +
+        "profit per sale (e.g. \"- 10GB 30 days: retail ₱X | your price ₱Y | your profit ₱Z\"), and encourage them: this is what they will earn once approved. " +
+        "Make clear these reseller prices apply after approval; if they order now, it is at the retail price."
+      : "\n\n--- THIS CHAT ---\nThis person is NOT an approved reseller. Never quote reseller prices or reseller discounts to them.");
   const kitContext = kitUrl ? `\nTheir personal MARKETING KIT (ready-to-post images and captions that already show their own name and contact): ${kitUrl} . ` +
     `Share this link when they ask for posts, images, captions, marketing materials or how to promote. Tell them to keep it private because it shows their contact details.` : "";
   // Warm welcome-back greeting on the first message of a new visit.
