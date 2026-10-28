@@ -2593,8 +2593,10 @@ async function getClaudeReply(senderId, userText) {
   const resellerContext = member
     ? `\n\n--- THIS CHAT ---\nThe person you are chatting with is an APPROVED ${member.tier === "gold" ? "GOLD" : "STARTER"} RESELLER` +
       `${member.name ? `; their name is ${member.name}, so address them by that name` : ""}. In search and get_plan results for this person, "price" IS their reseller price (what they pay us), ` +
-      `"retailPrice" is our public price and "resellerProfitIfSoldAtRetail" is their profit. Always quote "price" as their price ` +
-      `(you may also mention the retail price and their profit) and use it as confirmedPrice in create_order. Discount codes don't ` +
+      `"retailPrice" is our public price and "resellerProfitIfSoldAtRetail" is their profit. Whenever you list or quote plans to them, ` +
+      `ALWAYS show for EACH plan all three: retail price, their reseller price, and their profit per sale, one line per plan, e.g. ` +
+      `"- 10GB 30 days: retail ₱X | your price ₱Y | your profit ₱Z". Never leave out the profit. Use "price" as confirmedPrice in create_order. ` +
+      `If a plan says its reseller price is not available, list it at retail and say an admin can quote it. Discount codes don't ` +
       `apply to reseller prices. This status is current and OVERRIDES anything said earlier in the conversation (e.g. an application ` +
       `that was pending); if a plan was quoted earlier, call get_plan again to get the reseller price before ordering.` + (member.tier === "gold" ? ` As a Gold reseller they can pay with paymentMethod "Wallet" (deducted from their prepaid wallet). Never refuse a Wallet payment yourself -- ` +
         `call create_order with paymentMethod "Wallet"; it checks the balance and tells you if it's too low.` : "")
