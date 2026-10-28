@@ -34,7 +34,7 @@ app.use(express.json({ verify: (req, res, buf) => { req.rawBody = buf; } }));
 
 const PORT = process.env.PORT || 3000;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
-const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
+let PAGE_ACCESS_TOKEN = (process.env.PAGE_ACCESS_TOKEN || "").trim();
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const CLAUDE_MODEL = process.env.CLAUDE_MODEL || "claude-haiku-4-5-20251001";
 // Where the admin gets alerts (with sound) on their phone -- see README, "Admin alerts".
@@ -58,6 +58,36 @@ if (!VERIFY_TOKEN || !PAGE_ACCESS_TOKEN || !ANTHROPIC_API_KEY) {
     "The server will start, but the bot will not work until these are set."
   );
 }
+// The Send API needs a PAGE token. If PAGE_ACCESS_TOKEN holds a user or system-user
+// token by mistake, swap in the Page token derived from it, so the bot keeps working.
+const FB_PAGE_ID = (process.env.PAGE_ID || "103294518884622").trim();
+async function resolvePageToken() {
+  if (!PAGE_ACCESS_TOKEN) return;
+  const g = async (path) => {
+    const r = await fetch(`https://graph.facebook.com/v21.0/${path}${path.includes("?") ? "&" : "?"}access_token=${encodeURIComponent(PAGE_ACCESS_TOKEN)}`);
+    return { ok: r.ok, d: await r.json().catch(() => ({})) };
+  };
+  try {
+    const me = await g("me?fields=id,name");
+    if (me.ok && String(me.d.id) === FB_PAGE_ID) { console.log(`[token] Page token OK (${me.d.name}).`); return; }
+    console.warn(`[token] PAGE_ACCESS_TOKEN is not a Page token (it belongs to "${(me.d && me.d.name) || "unknown"}"). Looking up the Page token...`);
+    let pageToken = null, pageName = "";
+    const direct = await g(`${FB_PAGE_ID}?fields=access_token,name`);
+    if (direct.ok && direct.d.access_token) { pageToken = direct.d.access_token; pageName = direct.d.name; }
+    if (!pageToken) {
+      const acc = await g("me/accounts?fields=id,name,access_token&limit=100");
+      const pg = acc.ok && (acc.d.data || []).find((x) => String(x.id) === FB_PAGE_ID);
+      if (pg && pg.access_token) { pageToken = pg.access_token; pageName = pg.name; }
+    }
+    if (pageToken) {
+      PAGE_ACCESS_TOKEN = pageToken;
+      console.log(`[token] Using the Page token for "${pageName}" derived from PAGE_ACCESS_TOKEN.`);
+    } else {
+      console.error("[token] Could not get a Page token. Give the token's system user access to the Page (Messages) and pages_messaging permission.", JSON.stringify(direct.d).slice(0, 300));
+    }
+  } catch (err) { console.error("[token] check failed:", err.message); }
+}
+resolvePageToken();
 if (!ADMIN_NTFY_TOPIC) {
   console.warn("[startup] ADMIN_NTFY_TOPIC not set -- admin phone alerts are OFF (alerts will only appear in the Render logs).");
 }
