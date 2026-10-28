@@ -2596,7 +2596,10 @@ async function getClaudeReply(senderId, userText) {
       `"retailPrice" is our public price and "resellerProfitIfSoldAtRetail" is their profit. Whenever you list or quote plans to them, ` +
       `ALWAYS show for EACH plan all three: retail price, their reseller price, and their profit per sale, one line per plan, e.g. ` +
       `"- 10GB 30 days: retail ₱X | your price ₱Y | your profit ₱Z". Never leave out the profit. Use "price" as confirmedPrice in create_order. ` +
-      `If a plan says its reseller price is not available, list it at retail and say an admin can quote it. Discount codes don't ` +
+      `If a plan says its reseller price is not available, list it at retail and say an admin can quote it. ` +
+      `Prices shown earlier in this chat may have been RETAIL prices from before approval, so whenever they mention a destination or ask ` +
+      `about plans, prices or profit, ALWAYS call the search tool again right away and send the full list with the three prices. Never ` +
+      `answer with "the list I shared earlier" and never ask them to pick a plan before showing the new list. Discount codes don't ` +
       `apply to reseller prices. This status is current and OVERRIDES anything said earlier in the conversation (e.g. an application ` +
       `that was pending); if a plan was quoted earlier, call get_plan again to get the reseller price before ordering.` + (member.tier === "gold" ? ` As a Gold reseller they can pay with paymentMethod "Wallet" (deducted from their prepaid wallet). Never refuse a Wallet payment yourself -- ` +
         `call create_order with paymentMethod "Wallet"; it checks the balance and tells you if it's too low.` : "")
