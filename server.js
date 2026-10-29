@@ -541,6 +541,24 @@ async function runTool(name, input, senderId) {
         };
       }
 
+      // Orderability check: never take payment for a plan our supplier can't issue automatically.
+      if (esims.configured()) {
+        try {
+          const raw0 = getRawPlan(basePlan.planId);
+          const pk0 = await esims.findPackage(basePlan.name, { retailUSD: raw0 && raw0.retailPrice, costUSD: reseller.costOf(raw0) });
+          if (pk0 === null) {
+            console.warn(`[order] not orderable at supplier: ${basePlan.name}`);
+            notifyAdmin({ title: "Plan not available at eSIMCard", message: `${await getCustomerName(senderId)} wanted "${basePlan.name}" (${basePlan.price}). The bot offered another plan instead.`, tags: "warning" }).catch(() => {});
+            return {
+              error:
+                `This exact plan ("${basePlan.name}") is temporarily unavailable from our supplier, so do NOT create the order. ` +
+                "Apologise briefly, then search again and offer the closest alternatives that fit their trip: the same country with a " +
+                "slightly different data size or validity, or a regional plan (e.g. Europe) that covers the country. Show prices, let them choose, then order that one."
+            };
+          }
+        } catch (e) { console.error("[order] orderability check skipped:", e.message); }
+      }
+
       // Discount: only one per customer, ever. Record it now (atomically) so it can't be used twice.
       let plan = resellerPlan || applyDiscount(basePlan, input.discountCode);
       let discountNote = resellerPlan ? `Reseller price (retail ${basePlan.price}).\n` : "";

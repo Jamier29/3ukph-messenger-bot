@@ -344,7 +344,12 @@ async function findPackage(name, hint = {}) {
   const list = await packageList();
   if (!list.length) return { loading: true, status: pricingStatus() };
   let hits = list.filter((p) => normName(p.name) === normName(name));
-  if (!hits.length) return null;
+  if (!hits.length) {
+    // The list may be missing pages or be out of date: refresh it in the background (at most every 30 min).
+    const age = Date.now() - (pricingCache.at || 0);
+    if (TOKEN && age > 30 * 60000 && !(pkgBuild && !pkgBuild.finishedAt)) { console.log(`[esimcard] "${name}" not found; refreshing package list`); buildPackageIndex(); }
+    return null;
+  }
   if (hits.length > 1) {
     const targets = [hint.retailUSD, hint.costUSD].filter((x) => x > 0);
     const byPrice = hits.filter((h) => priceValues(h.raw).some((v) => targets.some((t) => Math.abs(v - t) < 0.015)));
