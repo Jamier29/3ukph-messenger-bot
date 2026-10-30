@@ -1742,7 +1742,7 @@ async function kitResellers() {
     const lbl = kit.resellerLabel(m, m.psid);
     return { psid: m.psid, tier: m.tier, name: lbl.name, contact: lbl.contact, channel: isWa(m.psid) ? "WhatsApp" : "Messenger",
       link: await kitLink(m.psid), lastMessageAt: last ? new Date(last).toISOString() : null,
-      canSendNow: isWa(m.psid) && last > 0 && now - last < 23 * 3600000 };
+      canSendNow: last > 0 && now - last < 23 * 3600000 };
   }));
 }
 app.get("/admin/api/kit", requireAdmin, async (req, res) => {
@@ -1783,6 +1783,33 @@ async function kitSendTo(psid, post) {
   const img = await kit.personalImage(post, member, psid);
   const caption = kit.personalCaption(post, member, psid);
   const intro = `📣 New ready-to-post for you! Post it on your Facebook, Instagram or TikTok. Your name and contact are already on it.\nAll your posts: ${await kitLink(psid)}`;
+  if (!isWa(psid)) {
+    // Messenger: text, image, caption (inside the 24-hour window). Does not pause the AI assistant.
+    const fbText = async (text) => {
+      const r = await fetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${encodeURIComponent(PAGE_ACCESS_TOKEN)}`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recipient: { id: psid }, messaging_type: "RESPONSE", message: { text: text.slice(0, 1990), metadata: BOT_METADATA } })
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error((d.error && d.error.message) || `Facebook error ${r.status}`);
+      rememberSentId(d.message_id);
+    };
+    await fbText(intro);
+    const fdm = new FormData();
+    fdm.append("recipient", JSON.stringify({ id: psid }));
+    fdm.append("messaging_type", "RESPONSE");
+    fdm.append("message", JSON.stringify({ attachment: { type: "image", payload: { is_reusable: false } }, metadata: BOT_METADATA }));
+    fdm.append("filedata", new Blob([img], { type: "image/jpeg" }), "post.jpg");
+    const ri = await fetch(`https://graph.facebook.com/v21.0/me/messages?access_token=${encodeURIComponent(PAGE_ACCESS_TOKEN)}`, { method: "POST", body: fdm });
+    const di = await ri.json().catch(() => ({}));
+    if (!ri.ok) throw new Error((di.error && di.error.message) || `Facebook image error ${ri.status}`);
+    rememberSentId(di.message_id);
+    for (let rest = caption; rest; rest = rest.slice(1990)) await fbText(rest.slice(0, 1990));
+    const keyM = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    await storeSentImage(keyM, "image/jpeg", img);
+    recordChat(psid, true, "(marketing kit post) " + caption, "admin", { media: { src: "store", mime: "image/jpeg", key: keyM } });
+    return;
+  }
   const fd = new FormData();
   fd.append("messaging_product", "whatsapp"); fd.append("type", "image/jpeg");
   fd.append("file", new Blob([img], { type: "image/jpeg" }), "post.jpg");
@@ -1802,7 +1829,7 @@ app.post("/admin/api/kit/send", requireAdmin, async (req, res) => {
   const list = await kitResellers();
   const sent = [], skipped = [], failed = [];
   for (const r of list) {
-    if (!r.canSendNow) { skipped.push({ name: r.name, link: r.link, reason: r.channel === "WhatsApp" ? "No message from them in the last 24 hours" : "Messenger reseller" }); continue; }
+    if (!r.canSendNow) { skipped.push({ name: r.name, link: r.link, reason: `No message from them in the last 24 hours (${r.channel} only allows sending inside that window). Send them their kit link instead.` }); continue; }
     try { await kitSendTo(r.psid, post); sent.push(r.name); }
     catch (e) { failed.push({ name: r.name, link: r.link, reason: e.message }); }
   }
