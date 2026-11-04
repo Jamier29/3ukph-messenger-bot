@@ -19,6 +19,7 @@ const { startPriceSync, syncPrices, getSyncStatus } = require("./priceSync");
 const crypto = require("crypto");
 const ExcelJS = require("exceljs");
 const reseller = require("./reseller");
+const capi = require("./capi");
 const kit = require("./marketingKit");
 const pm = require("./paymongo");
 const { tripContext } = require("./tripAdvisor");
@@ -281,6 +282,7 @@ async function checkDiscountDb() {
 }
 // Reseller program data (private costs + approved resellers) also lives in Upstash.
 reseller.init(UPSTASH_URL && UPSTASH_TOKEN ? redis : null);
+capi.init(UPSTASH_URL && UPSTASH_TOKEN ? redis : null);
 kit.init({ redis: UPSTASH_URL && UPSTASH_TOKEN ? redis : null, callClaude: (sys, user, max) => callClaudeText(sys, user, max, 0.9), findPlans: (q, n) => findPlansByText(q, n) });
 esims.init(UPSTASH_URL && UPSTASH_TOKEN ? redis : null);
 
@@ -1585,6 +1587,7 @@ async function handlePaidCheckout(id, source) {
       catch (e) { console.error("[paymongo] test message failed:", e.message); }
       return;
     }
+    capi.sendPurchase({ psid, valuePHP: order.pricePHP, email: order.email, ref: order.ref, planName: order.planName }).catch(() => {});
     if (!AUTO_DELIVER) return manual("Automatic delivery is switched off (AUTO_DELIVER=off).");
     if (order.pricePHP > AUTO_DELIVER_MAX_PHP) return manual(`Order is above the auto-delivery limit of ${formatPHP(AUTO_DELIVER_MAX_PHP)}.`);
     if ((await pmDailyCount()) > AUTO_DELIVER_DAILY_MAX) return manual(`Daily auto-delivery limit (${AUTO_DELIVER_DAILY_MAX}) reached.`);
@@ -2495,7 +2498,7 @@ app.post("/admin/api/resume-bot", requireAdmin, (req, res) => {
 
 // Health check for uptime monitoring
 app.get("/health", (req, res) => {
-  res.send(`3UKPH Messenger bot is running. Catalog: ${listAllDestinations().length} destinations loaded. Messenger token: ${pageTokenStatus}.`);
+  res.send(`3UKPH Messenger bot is running. Catalog: ${listAllDestinations().length} destinations loaded. Messenger token: ${pageTokenStatus}. Purchase tracking: ${capi.configured() ? "on" : "off"}${capi.status().last.at ? " (last: " + capi.status().last.message + ")" : ""}.`);
 });
 
 // ---------------------------------------------------------------------
@@ -2536,6 +2539,11 @@ app.post("/webhook", async (req, res) => {
 
 async function handleMessagingEvent(event) {
   const message = event.message;
+  // Remember if this chat came from an ad (for purchase tracking in Ads Manager).
+  const adRef = event.referral || (message && message.referral) || (event.postback && event.postback.referral);
+  if (adRef && event.sender && event.sender.id && (adRef.ad_id || adRef.source === "ADS")) {
+    capi.rememberReferral(String(event.sender.id), { ad_id: adRef.ad_id || null, source: adRef.source || null }).catch(() => {});
+  }
 
   // Echo = a message the PAGE sent. If the bot didn't send it, an admin
   // typed it in the inbox -> pause the bot in that chat so they don't talk over each other.
@@ -2992,6 +3000,9 @@ app.post("/whatsapp/webhook", async (req, res) => {
 async function handleWhatsAppMessage(m, profileName) {
   const senderId = "wa" + String(m.from || "").replace(/\D/g, "");
   if (senderId === "wa") return;
+  if (m.referral && (m.referral.ctwa_clid || m.referral.source_id)) {
+    capi.rememberReferral(senderId, { ctwa_clid: m.referral.ctwa_clid || null, ad_id: m.referral.source_id || null }).catch(() => {});
+  }
   if (profileName) {
     nameCache.set(senderId, `${profileName} (+${senderId.slice(2)})`);
     if (UPSTASH_URL && UPSTASH_TOKEN) redis(["SET", `wa:name:${senderId}`, profileName.slice(0, 80)]).catch(() => {});
