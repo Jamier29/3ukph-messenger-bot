@@ -40,15 +40,17 @@ function setCatalog(rawPlans, { rate, source, updatedAt, aliases } = {}) {
   const used = new Set();
   PLANS = rawPlans.map((p, i) => { const id = stableId(p, i, used); used.add(id); return { ...p, planId: id }; });
   PLANS_BY_ID = new Map(PLANS.map((p) => [p.planId, p]));
-  if (aliases) PLAN_ALIASES = new Map(Object.entries(aliases));
+  if (aliases) PLAN_ALIASES = new Map([...PLAN_ALIASES, ...Object.entries(aliases)]);
   DESTINATIONS = [...new Set(PLANS.map((p) => p.destination))].sort((a, b) => a.localeCompare(b));
   DESTINATIONS_LOWER = DESTINATIONS.map((d) => d.toLowerCase());
   if (typeof rate === "number" && rate > 0) USD_TO_PHP = rate;
   CATALOG_INFO = { source: source || CATALOG_INFO.source, updatedAt: updatedAt || new Date().toISOString(), planCount: PLANS.length };
 }
 
+let builtInAliases = {};
+try { builtInAliases = JSON.parse(fs.readFileSync(path.join(__dirname, "data", "plan-aliases.json"), "utf8")); } catch (_) { /* none */ }
 setCatalog(JSON.parse(fs.readFileSync(path.join(__dirname, "data", "plans.json"), "utf8")), {
-  source: "built-in file (data/plans.json)"
+  source: "built-in file (data/plans.json)", aliases: builtInAliases
 });
 
 // Common alternate names customers might type. Add more here any time you
