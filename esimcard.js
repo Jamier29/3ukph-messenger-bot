@@ -341,6 +341,13 @@ function priceValues(raw) {
   return vals;
 }
 async function findPackage(name, hint = {}) {
+  // Plans from the eSIMCard export know their exact package ID: no name guessing needed.
+  if (hint.packageId) {
+    const list0 = await packageList().catch(() => []);
+    const hit = (list0 || []).find((p) => p.id === String(hint.packageId));
+    if (hit) { const { raw, ...p } = hit; return { ...p, matches: 1 }; }
+    return { id: String(hint.packageId), name, price: null, matches: 1, direct: true };
+  }
   const list = await packageList();
   if (!list.length) return { loading: true, status: pricingStatus() };
   let hits = list.filter((p) => normName(p.name) === normName(name));

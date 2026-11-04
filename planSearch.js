@@ -26,9 +26,21 @@ let CATALOG_INFO = { source: "built-in file (data/plans.json)", updatedAt: null,
 // refer to ONE exact plan. Several plans share the same name (e.g. two
 // different "50GB eSIM Data for 30 Days in Europe" with different prices
 // and coverage), which is what caused mixed-up prices before.
-function setCatalog(rawPlans, { rate, source, updatedAt } = {}) {
-  PLANS = rawPlans.map((p, i) => ({ ...p, planId: "P" + (i + 1) }));
+let PLAN_ALIASES = new Map(); // old planId -> current planId (after a catalog update)
+// Plans from the eSIMCard export carry their eSIMCard package ID, which gives them a
+// stable planId ("K" + part of that ID) that stays the same across price updates.
+function stableId(p, i, used) {
+  if (p.packageId) {
+    const hex = String(p.packageId).replace(/[^0-9a-f]/gi, "").toUpperCase();
+    for (const len of [10, 16, 32]) { const id = "K" + hex.slice(0, len); if (hex.length >= len && !used.has(id)) return id; }
+  }
+  return "P" + (i + 1);
+}
+function setCatalog(rawPlans, { rate, source, updatedAt, aliases } = {}) {
+  const used = new Set();
+  PLANS = rawPlans.map((p, i) => { const id = stableId(p, i, used); used.add(id); return { ...p, planId: id }; });
   PLANS_BY_ID = new Map(PLANS.map((p) => [p.planId, p]));
+  if (aliases) PLAN_ALIASES = new Map(Object.entries(aliases));
   DESTINATIONS = [...new Set(PLANS.map((p) => p.destination))].sort((a, b) => a.localeCompare(b));
   DESTINATIONS_LOWER = DESTINATIONS.map((d) => d.toLowerCase());
   if (typeof rate === "number" && rate > 0) USD_TO_PHP = rate;
@@ -232,14 +244,16 @@ function searchMultiCountryPlans({ countries, minDataGB, minDays, maxDays, needs
 }
 
 function getPlan(planId) {
-  const p = PLANS_BY_ID.get(String(planId || "").trim().toUpperCase());
+  const k0 = String(planId || "").trim().toUpperCase();
+  const p = PLANS_BY_ID.get(k0) || PLANS_BY_ID.get(PLAN_ALIASES.get(k0));
   return p ? describePlan(p) : null;
 }
 
 // Raw catalog entry (includes the USD retail price) -- server-side use only,
 // e.g. to look up the reseller price. Never send this to customers.
 function getRawPlan(planId) {
-  return PLANS_BY_ID.get(String(planId || "").trim().toUpperCase()) || null;
+  const k1 = String(planId || "").trim().toUpperCase();
+  return PLANS_BY_ID.get(k1) || PLANS_BY_ID.get(PLAN_ALIASES.get(k1)) || null;
 }
 
 function listAllDestinations() {

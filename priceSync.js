@@ -27,6 +27,8 @@ const MIN_PLANS = 500; // a real price list has thousands; fewer means something
 
 let lastResult = { ok: null, message: SHEET_URL ? "Not synced yet." : "PRICE_SHEET_URL is not set, using built-in prices.", at: null };
 let running = false;
+let uploadLock = null; // set when the Admin Console upload is the source of truth
+function setUploadLock(at) { uploadLock = at || null; }
 
 function cellText(v) {
   if (v === null || v === undefined) return "";
@@ -102,6 +104,7 @@ function workbookToCatalog(wb) {
         retailPrice: Math.round(price * 100) / 100,
         networks: col("supported networks") ? cellText(row.getCell(col("supported networks")).value).trim() : ""
       };
+      if (col("package type id")) { const pid = cellText(row.getCell(col("package type id")).value).trim(); if (pid) plan.packageId = pid; }
       if (scope !== "country" && col("supported countries")) {
         plan.countries = cellText(row.getCell(col("supported countries")).value)
           .split(",").map((s) => s.trim()).filter(Boolean);
@@ -135,6 +138,7 @@ async function syncPrices(reason = "scheduled") {
       throw new Error(`Too many problem rows (${problems.length}). First ones: ${problems.slice(0, 3).join(" | ")}`);
     }
 
+    if (uploadLock) throw new Error(`Using the eSIMCard export uploaded in the Admin Console (${uploadLock}); the Google Sheet is not used while that is active.`);
     setCatalog(plans, { rate, source: "Google Sheet (PRICE_SHEET_URL)", updatedAt: at });
     // If the sheet also has a "Price" (your cost) column, refresh reseller prices too.
     try {
@@ -173,4 +177,4 @@ function getSyncStatus() {
   return { ...lastResult, autoUpdate: !!SHEET_URL, everyMinutes: SYNC_MINUTES, catalog: getCatalogInfo() };
 }
 
-module.exports = { startPriceSync, syncPrices, getSyncStatus, workbookToCatalog };
+module.exports = { startPriceSync, syncPrices, getSyncStatus, workbookToCatalog, setUploadLock };

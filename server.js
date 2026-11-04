@@ -15,7 +15,54 @@ const { BUSINESS_INFO } = require("./business-info");
 const { allPlans, searchMultiCountryPlans, findPlansByText, getRawPlan, searchPlans, getPlan, listAllDestinations, getRate, headlinePrices, regionSummaries, formatPHP } = require("./planSearch");
 const QRCode = require("qrcode");
 const { brandedQr } = require("./qrcard");
-const { startPriceSync, syncPrices, getSyncStatus } = require("./priceSync");
+const { startPriceSync, syncPrices, getSyncStatus, workbookToCatalog, setUploadLock } = require("./priceSync");
+const { setCatalog, getCatalogInfo } = require("./planSearch");
+const zlibCat = require("zlib");
+
+// ---------------------------------------------------------------------
+// Catalog from the eSIMCard reseller_pricing export (uploaded in the Admin Console).
+// One upload updates everything: website + bot prices, plan list, reseller costs,
+// and the eSIMCard package ID of every plan (so orders buy the exact package).
+// ---------------------------------------------------------------------
+const catKey = (p) => [p.destination, p.name, p.validityDays, p.data, p.voiceSms ? 1 : 0].join("|").toLowerCase();
+function catalogAliases(oldPlans, newPlansWithIds) {
+  const exact = new Map(), loose = new Map();
+  for (const n of newPlansWithIds) {
+    exact.set(catKey(n) + "|" + n.retailPrice, n.planId);
+    const k = catKey(n); loose.set(k, loose.has(k) ? null : n.planId);
+  }
+  const aliases = {};
+  for (const o of oldPlans) {
+    const id = exact.get(catKey(o) + "|" + o.retailPrice) || loose.get(catKey(o));
+    if (id && id !== o.planId) aliases[o.planId] = id;
+  }
+  return aliases;
+}
+async function applyUploadedCatalog(plans, at, { persist } = {}) {
+  const before = allPlans();
+  setCatalog(plans, { source: "eSIMCard export (Admin Console upload)", updatedAt: at });
+  const aliases = catalogAliases(before, allPlans());
+  setCatalog(plans, { source: "eSIMCard export (Admin Console upload)", updatedAt: at, aliases });
+  setUploadLock(at);
+  if (persist && UPSTASH_URL && UPSTASH_TOKEN) {
+    const packed = zlibCat.gzipSync(JSON.stringify({ at, plans, aliases })).toString("base64");
+    await redis(["SET", "catalog:upload", packed]);
+  }
+  return { before, aliases };
+}
+async function loadUploadedCatalog() {
+  if (!(UPSTASH_URL && UPSTASH_TOKEN)) return;
+  try {
+    const v = await redis(["GET", "catalog:upload"]);
+    if (!v) return;
+    const d = JSON.parse(zlibCat.gunzipSync(Buffer.from(v, "base64")).toString("utf8"));
+    if (Array.isArray(d.plans) && d.plans.length >= 500) {
+      setCatalog(d.plans, { source: "eSIMCard export (Admin Console upload)", updatedAt: d.at, aliases: d.aliases || {} });
+      setUploadLock(d.at);
+      console.log(`[catalog] Loaded ${d.plans.length} plans from the eSIMCard export uploaded ${d.at}.`);
+    }
+  } catch (e) { console.error("[catalog] could not load uploaded catalog:", e.message); }
+}
 const crypto = require("crypto");
 const ExcelJS = require("exceljs");
 const reseller = require("./reseller");
@@ -547,7 +594,7 @@ async function runTool(name, input, senderId) {
       if (esims.configured()) {
         try {
           const raw0 = getRawPlan(basePlan.planId);
-          const pk0 = await esims.findPackage(basePlan.name, { retailUSD: raw0 && raw0.retailPrice, costUSD: reseller.costOf(raw0) });
+          const pk0 = await esims.findPackage(basePlan.name, { retailUSD: raw0 && raw0.retailPrice, costUSD: reseller.costOf(raw0), packageId: raw0 && raw0.packageId });
           if (pk0 === null) {
             console.warn(`[order] not orderable at supplier: ${basePlan.name}`);
             notifyAdmin({ title: "Plan not available at eSIMCard", message: `${await getCustomerName(senderId)} wanted "${basePlan.name}" (${basePlan.price}). The bot offered another plan instead.`, tags: "warning" }).catch(() => {});
@@ -1390,7 +1437,7 @@ app.get("/admin/api/delivery", requireAdmin, async (req, res) => {
   if (plan && esims.configured()) {
     try {
       const raw = getRawPlan(plan.planId);
-      const pk = await esims.findPackage(plan.name, { retailUSD: raw && raw.retailPrice, costUSD: reseller.costOf(raw) });
+      const pk = await esims.findPackage(plan.name, { retailUSD: raw && raw.retailPrice, costUSD: reseller.costOf(raw), packageId: raw && raw.packageId });
       if (pk && pk.loading) out.packageError = `Downloading the eSIMCard package list (${pk.status.building || "starting"}). This takes about 5 minutes the first time; pick the plan again shortly.`;
       else if (pk && pk.ambiguous) out.packageError = `eSIMCard has ${pk.matches} packages named "${pk.name}" and the price didn't single one out. Deliver this one manually.`;
       else out.package = pk;
@@ -1412,7 +1459,7 @@ async function deliverEsim(psid, planId, opts = {}) {
   deliveryLocks.add(psid);
   try {
     const rawPlan = getRawPlan(plan.planId);
-    const pkg = await esims.findPackage(plan.name, { retailUSD: rawPlan && rawPlan.retailPrice, costUSD: reseller.costOf(rawPlan) });
+    const pkg = await esims.findPackage(plan.name, { retailUSD: rawPlan && rawPlan.retailPrice, costUSD: reseller.costOf(rawPlan), packageId: rawPlan && rawPlan.packageId });
     if (pkg && pkg.loading) throw deliverError(503, "The eSIMCard package list is still downloading. Try again in a few minutes.");
     if (pkg && pkg.ambiguous) throw deliverError(400, `eSIMCard has ${pkg.matches} packages with this name. Deliver this one manually.`);
     if (!pkg) throw deliverError(400, `eSIMCard has no package named "${plan.name}". Deliver this one manually.`);
@@ -1976,7 +2023,25 @@ app.post("/admin/api/reseller-costs", requireAdmin, express.raw({ type: "*/*", l
     const map = reseller.costsFromWorkbook(wb);
     if (map.size < 500) return res.status(400).json({ error: `Only ${map.size} plans with a cost found. Upload the eSIMCard reseller_pricing export (it needs "Price" and "Retail Price" columns).` });
     const r = await reseller.saveCosts(map, "Admin Console upload");
-    res.json({ ok: true, plans: map.size, savedToDatabase: r.saved });
+    // Same file also updates the plan list + retail prices for the website, bot and partner API.
+    let catalog = null;
+    try {
+      const cat = workbookToCatalog(wb);
+      if (cat.plans.length >= 500 && cat.problems.length <= cat.plans.length * 0.05) {
+        const at = new Date().toISOString();
+        const oldByKey = new Map(allPlans().map((p) => [catKey(p), p.retailPrice]));
+        const { before } = await applyUploadedCatalog(cat.plans, at, { persist: true });
+        const newKeys = new Set(cat.plans.map(catKey));
+        let changed = 0, added = 0;
+        for (const p of cat.plans) { const o = oldByKey.get(catKey(p)); if (o === undefined) added++; else if (Math.abs(o - p.retailPrice) > 0.004) changed++; }
+        const removed = before.filter((p) => !newKeys.has(catKey(p))).length;
+        catalog = { plans: cat.plans.length, added, removed, priceChanged: changed, skippedRows: cat.problems.length };
+        console.log(`[catalog] Updated from upload: ${JSON.stringify(catalog)}`);
+      } else {
+        catalog = { error: `Prices for resellers saved, but the plan list was not changed (${cat.plans.length} plans, ${cat.problems.length} problem rows).` };
+      }
+    } catch (e) { catalog = { error: "Plan list not updated: " + e.message }; }
+    res.json({ ok: true, plans: map.size, savedToDatabase: r.saved, catalog });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -2192,7 +2257,7 @@ async function partnerAuth(req, res, next) {
 // Buys the eSIM for a plan without messaging anyone. Same safety checks as deliverEsim.
 async function buyEsimForPlan(p, paidPHP) {
   if (!esims.configured()) throw deliverError(503, "Ordering is temporarily unavailable.");
-  const pkg = await esims.findPackage(p.name, { retailUSD: p.retailPrice, costUSD: reseller.costOf(p) });
+  const pkg = await esims.findPackage(p.name, { retailUSD: p.retailPrice, costUSD: reseller.costOf(p), packageId: p.packageId });
   if (pkg && pkg.loading) throw deliverError(503, "Plans are still loading. Please try again in a few minutes.");
   if (!pkg || pkg.ambiguous) throw deliverError(409, "This plan can't be ordered automatically right now. Please contact us on WhatsApp.");
   let costUSD = pkg.price;
@@ -2480,7 +2545,7 @@ app.get("/admin/esimcard-test", async (req, res) => {
       const rows = [];
       for (const pl of findPlansByText(req.query.find, 4)) {
         const raw = getRawPlan(pl.planId);
-        rows.push({ planId: pl.planId, name: pl.name, ourPrice: pl.price, costUSD: reseller.costOf(raw), package: await esims.findPackage(pl.name, { retailUSD: raw && raw.retailPrice, costUSD: reseller.costOf(raw) }) });
+        rows.push({ planId: pl.planId, name: pl.name, ourPrice: pl.price, costUSD: reseller.costOf(raw), package: await esims.findPackage(pl.name, { retailUSD: raw && raw.retailPrice, costUSD: reseller.costOf(raw), packageId: raw && raw.packageId }) });
       }
       return res.type("application/json").send(JSON.stringify({ packageList: { packages: st.packages, loadedAt: st.loadedAt }, rows }, null, 2));
     }
@@ -3093,7 +3158,7 @@ app.get("/admin/whatsapp-status", async (req, res) => {
   res.type("text/plain").send(r.ok ? `WhatsApp is ON ✅\nNumber: ${d.display_phone_number}\nName: ${d.verified_name} (${d.name_status})\nSMS verification: ${d.code_verification_status || "?"}\nStatus: ${d.status || "?"} (${d.platform_type || "?"})\nQuality: ${d.quality_rating || "?"}` : `Token or ID problem: ${(d.error && d.error.message) || r.status}`);
 });
 
-startPriceSync();
+loadUploadedCatalog().finally(() => startPriceSync());
 
 app.listen(PORT, () => {
   console.log(`3UKPH Messenger bot listening on port ${PORT}`);

@@ -240,7 +240,7 @@
     <section class="card">
       <span class="step">Resellers</span>
       <h2>Reseller prices</h2>
-      <p class="help">Approved resellers automatically see and pay their reseller price in Messenger. Prices are your cost + markup, so upload the latest eSIMCard <b>reseller_pricing</b> export (.xlsx) here whenever eSIMCard prices change. Your cost is saved privately in your database, never on the website.</p>
+      <p class="help">Approved resellers automatically see and pay their reseller price in Messenger. Prices are your cost + markup, so upload the latest eSIMCard <b>reseller_pricing</b> export (.xlsx) here whenever eSIMCard prices change. The same file also updates the plan list and retail prices on the website, the bot and the partner API, and links every plan to its exact eSIMCard package. Your cost is saved privately in your database, never on the website.</p>
       <div id="costsBox" class="help">Loading…</div>
       <div class="row" style="margin-top:10px">
         <input type="file" id="costsFile" accept=".xlsx">
@@ -813,7 +813,8 @@
     api("/admin/api/reseller-costs", { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: f })
       .then(function (d) {
         $("costsStatus").className = d.savedToDatabase ? "status ok" : "status err";
-        $("costsStatus").textContent = d.savedToDatabase ? "✓ Reseller prices updated for " + d.plans + " plans." : "Loaded " + d.plans + " plans, but the database isn't connected, so they'll be lost on restart.";
+        var cat = d.catalog ? (d.catalog.error ? " " + d.catalog.error : " Website, bot and partner API now use this file: " + d.catalog.plans + " plans (" + d.catalog.added + " new, " + d.catalog.removed + " removed, " + d.catalog.priceChanged + " price changes).") : "";
+        $("costsStatus").textContent = (d.savedToDatabase ? "✓ Reseller prices updated for " + d.plans + " plans." : "Loaded " + d.plans + " plans, but the database isn't connected, so they'll be lost on restart.") + cat;
         loadResellers();
       })
       .catch(function (e) { $("costsStatus").className = "status err"; $("costsStatus").textContent = e.message; });
