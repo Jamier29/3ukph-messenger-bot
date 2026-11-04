@@ -970,12 +970,24 @@ function search(){
   var da=document.getElementById('fdata').value;if(da&&da!=='unl')p.set('minDataGB',da);
   if(document.getElementById('fcalls').checked)p.set('calls','1');
   plansEl.innerHTML='<div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>';moreBtn.hidden=true;fromEl.textContent='';
-  fetch('/api/plans?'+p).then(function(r){return r.json();}).then(function(d){
-    found=(d.plans||[]);if(da==='unl')found=found.filter(function(x){return x.unlimitedData;});
+  function get(params,unl){return fetch('/api/plans?'+params).then(function(r){return r.json();}).then(function(d){var f=(d.plans||[]);if(unl)f=f.filter(function(x){return x.unlimitedData;});return {d:d,f:f};});}
+  // No exact match? Show the closest plans instead of an empty list.
+  var noDays=new URLSearchParams(p);noDays.delete('minDays');noDays.delete('maxDays');
+  var noData=new URLSearchParams(p);noData.delete('minDataGB');
+  get(p,da==='unl').then(function(r){
+    if(r.f.length)return {r:r,note:''};
+    var tries=[];
+    if(dv)tries.push({params:noDays,unl:da==='unl',note:'No exact match for that length, so here are the closest plans with the data you picked.'});
+    if(da)tries.push({params:noData,unl:false,note:'No exact match for that data amount, so here are the plans for that length of stay.'});
+    var chain=Promise.resolve(null);
+    tries.forEach(function(t){chain=chain.then(function(hit){if(hit)return hit;return get(t.params,t.unl).then(function(x){return x.f.length?{r:x,note:t.note}:null;});});});
+    return chain.then(function(hit){return hit||{r:r,note:''};});
+  }).then(function(res){
+    var d=res.r.d;found=res.r.f;
     if(!found.length){plansEl.innerHTML='';fromEl.innerHTML='No plans matched. Try fewer filters, or <a href="'+M+'" target="_blank" rel="noopener">message us</a> and we’ll find one for you.';return;}
     found.sort(function(a,b){return a.pricePHP-b.pricePHP;});
     var name=(d.matchedDestinations||[q]).join(', ').replace(/^global$/,'Global');
-    fromEl.innerHTML='<strong>'+found.length+'</strong> plan'+(found.length>1?'s':'')+' for <strong>'+esc(name)+'</strong>, cheapest first, from <strong>'+found[0].price+'</strong>.';
+    fromEl.innerHTML=(res.note?esc(res.note)+'<br>':'')+'<strong>'+found.length+'</strong> plan'+(found.length>1?'s':'')+' for <strong>'+esc(name)+'</strong>, cheapest first, from <strong>'+found[0].price+'</strong>.';
     plansEl.innerHTML='';shown=0;more();
   }).catch(function(){plansEl.innerHTML='';fromEl.innerHTML='Couldn’t load prices right now. Please <a href="'+M+'" target="_blank" rel="noopener">message us</a> for a quote.';});
 }
