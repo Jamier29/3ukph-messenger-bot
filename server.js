@@ -2827,6 +2827,24 @@ async function getClaudeReply(senderId, userText) {
       await sendText(senderId, greeting);
       greetingContext = `\n\n--- GREETING ---\nThis message was just sent to them: "${greeting}". Do NOT greet or welcome them again; go straight to answering their message.`;
     }
+    // Holiday "Follow us" card for new Messenger contacts (once per person, until the promo ends).
+    if (!isWa(senderId) && !member && !(customerRec && customerRec.orders > 0) && manilaDate() <= HOLIDAY_TO) {
+      try {
+        const key = `promo:followcta:${senderId}`;
+        const first = hasDb() ? (await redis(["SET", key, "1", "NX", "EX", 120 * 24 * 3600])) === "OK" : !seenMemory.has("cta:" + senderId);
+        if (!hasDb()) seenMemory.set("cta:" + senderId, 1);
+        if (first) {
+          const when = holidayActive() ? "now until Jan 15" : "from Dec 1 to Jan 15";
+          const text = `🎄 Holiday gift for new friends: follow our Facebook Page and get an extra ₱${NEW_FB_BONUS_PHP} off your first eSIM order of ₱${NEW_FB_BONUS_MIN_PHP}+ here on Messenger (${when}). It adds on top of our PASKO10 holiday promo!`;
+          const sent = await callSendApi({ recipient: { id: senderId }, messaging_type: "RESPONSE", message: { attachment: { type: "template", payload: { template_type: "button", text,
+            buttons: [{ type: "web_url", url: `https://www.facebook.com/${FB_PAGE_ID}`, title: "👍 Follow our Page" }] } } } });
+          if (sent) {
+            recordChat(senderId, true, text, "bot");
+            greetingContext += `\n\n--- FOLLOW CARD ---\nThis card was just sent to them: "${text}". Don't repeat it; answer their message.`;
+          }
+        }
+      } catch (e) { console.error("[promo] follow card failed:", e.message); }
+    }
   }
   const systemPrompt =
     "You are the AI assistant for 3UK Philippines, an eSIM business, replying to customers on " +
