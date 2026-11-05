@@ -1012,8 +1012,9 @@ function more(){
 moreBtn.addEventListener('click',more);
 var toast=document.createElement('div');toast.id='copytoast';document.body.appendChild(toast);
 function showToast(m){toast.textContent=m;toast.classList.add('show');setTimeout(function(){toast.classList.remove('show');},3500);}
-var pc=document.getElementById('promoCode');if(pc)pc.addEventListener('click',function(){try{navigator.clipboard.writeText('WELCOME10').then(function(){showToast('Code WELCOME10 copied! Type it when you order.');});}catch(err){}});
-plansEl.addEventListener('click',function(e){var a=e.target.closest('a.order');if(!a)return;var t=a.getAttribute('data-txt')+'\nDiscount code: WELCOME10';
+(function(){try{var t=new Date(Date.now()+8*3600000).toISOString().slice(0,10);if(t>='2026-12-01'&&t<='2027-01-15'){var b=document.querySelector('.promo .wrap');if(b){var sp=b.querySelectorAll('span');if(sp[0])sp[0].innerHTML='🎄 Holiday promo: <b>10% off</b> any eSIM until Jan 15. Use code';var c=document.getElementById('promoCode');if(c)c.innerHTML='PASKO10 <small>Copy</small>';if(sp[1])sp[1].innerHTML='on WhatsApp or Messenger. New on Messenger? <b>Extra ₱50 off</b> orders ₱500+.';window.__PROMO='PASKO10';}}}catch(e){}})();
+var pc=document.getElementById('promoCode');if(pc)pc.addEventListener('click',function(){try{var cc=window.__PROMO||'WELCOME10';navigator.clipboard.writeText(cc).then(function(){showToast('Code '+cc+' copied! Type it when you order.');});}catch(err){}});
+plansEl.addEventListener('click',function(e){var a=e.target.closest('a.order');if(!a)return;var t=a.getAttribute('data-txt')+'\nDiscount code: '+(window.__PROMO||'WELCOME10');
   try{navigator.clipboard.writeText(t).then(function(){toast.textContent='Plan + WELCOME10 code copied! On Messenger, paste it and send.';toast.classList.add('show');setTimeout(function(){toast.classList.remove('show');},3500);});}catch(err){}
 });
 

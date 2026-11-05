@@ -247,6 +247,72 @@ const DISCOUNT_CODES = (() => {
   return codes;
 })();
 
+// Holiday promo (always on top of DISCOUNT_CODES): PASKO10 = 10% off, Dec 1 - Jan 15 (Manila dates).
+// Override with HOLIDAY_CODES, e.g. "PASKO10:10:2026-12-01:2027-01-15".
+const CODE_WINDOWS = {};
+for (const part of (process.env.HOLIDAY_CODES || "PASKO10:10:2026-12-01:2027-01-15").split(",")) {
+  const [code, pct, from, to] = part.split(":").map((x) => (x || "").trim());
+  const n = Number(pct);
+  if (code && n > 0 && n < 100 && from && to) { DISCOUNT_CODES[code.toUpperCase()] = n; CODE_WINDOWS[code.toUpperCase()] = { from, to }; }
+}
+const manilaDate = () => new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
+function codeWindowError(key) {
+  const w = CODE_WINDOWS[key];
+  if (!w) return null;
+  const today = manilaDate();
+  if (today < w.from) return `${key} starts on ${w.from} (Philippine time). It isn't active yet, so quote the regular price and tell them they can use it from that date.`;
+  if (today > w.to) return `${key} ended on ${w.to}. Quote the regular price.`;
+  return null;
+}
+// Holiday window for the Messenger new-customer bonus.
+const HOLIDAY_FROM = (process.env.HOLIDAY_FROM || "2026-12-01").trim();
+const HOLIDAY_TO = (process.env.HOLIDAY_TO || "2027-01-15").trim();
+const NEW_FB_BONUS_PHP = Number(process.env.NEW_FB_BONUS_PHP ?? 50);
+const NEW_FB_BONUS_MIN_PHP = Number(process.env.NEW_FB_BONUS_MIN_PHP ?? 500);
+const holidayActive = () => { const t = manilaDate(); return t >= HOLIDAY_FROM && t <= HOLIDAY_TO; };
+
+// Safety lock: no discount may push the price below cost + fees + a minimum profit.
+function priceFloorPHP(plan) {
+  const raw = getRawPlan(plan.planId);
+  const cost = reseller.costOf(raw);
+  if (!(cost > 0)) return Math.round(plan.pricePHP * 0.88 * 100) / 100; // unknown cost: max 12% off
+  const costPHP = cost * getRate();
+  const fees = plan.pricePHP * 0.03;
+  const minProfit = Math.max(15, plan.pricePHP * 0.08);
+  return Math.min(plan.pricePHP, Math.ceil((costPHP + fees + minProfit) * 100) / 100);
+}
+
+// Messenger first-time buyer bonus during the holidays (₱50 off orders of ₱500+, once per person).
+async function newFbBonusFor(senderId, regularPHP) {
+  if (!(NEW_FB_BONUS_PHP > 0) || isWa(senderId) || !holidayActive() || regularPHP < NEW_FB_BONUS_MIN_PHP) return 0;
+  const rec = await getCustomerRecord(senderId);
+  if (rec && rec.orders > 0) return 0;
+  try { if (hasDb() && (await redis(["GET", `promo:fbnew:${senderId}`]))) return 0; } catch (_) { /* ignore */ }
+  return NEW_FB_BONUS_PHP;
+}
+// Applies code + bonus, then the safety lock. Returns the plan with promo fields.
+function applyPromos(plan, codeResult, bonusPHP) {
+  const base = codeResult || plan;
+  if (!(bonusPHP > 0) && !(base.discountCode)) return base;
+  const regular = plan.pricePHP;
+  let price = (base.discountCode ? base.pricePHP : regular) - (bonusPHP || 0);
+  const floor = priceFloorPHP(plan);
+  const limited = price < floor;
+  if (limited) price = floor;
+  price = Math.round(price * 100) / 100;
+  if (price >= regular) return { ...plan, discountError: base.discountError || undefined, promoNote: "No discount possible on this plan (its margin is too small)." };
+  return {
+    ...base,
+    regularPrice: plan.price,
+    newCustomerBonus: bonusPHP > 0 ? formatPHP(bonusPHP) : undefined,
+    newCustomerBonusPHP: bonusPHP > 0 ? bonusPHP : undefined,
+    discountAmount: formatPHP(Math.round((regular - price) * 100) / 100),
+    price: formatPHP(price),
+    pricePHP: price,
+    promoNote: limited ? "Total discount was capped on this plan so we don't sell below cost." : undefined
+  };
+}
+
 // Returns the plan with the discount applied (price = discounted price), or
 // the plan unchanged plus a discountError if the code isn't valid.
 function applyDiscount(plan, code) {
@@ -254,6 +320,8 @@ function applyDiscount(plan, code) {
   const key = String(code).trim().toUpperCase().replace(/\s+/g, "");
   const pct = DISCOUNT_CODES[key];
   if (!pct) return { ...plan, discountError: `"${code}" is not a valid discount code. Quote the regular price.` };
+  const winErr = codeWindowError(key);
+  if (winErr) return { ...plan, discountError: winErr };
   const discounted = Math.round(plan.pricePHP * (100 - pct)) / 100;
   return {
     ...plan,
@@ -551,7 +619,7 @@ async function runTool(name, input, senderId) {
           console.error("[discount] could not check used discounts:", err.message);
         }
       }
-      return applyDiscount(plan, input.discountCode);
+      return applyPromos(plan, applyDiscount(plan, input.discountCode), await newFbBonusFor(senderId, plan.pricePHP));
     }
 
     case "create_order": {
@@ -577,8 +645,10 @@ async function runTool(name, input, senderId) {
       // Safety check: the plan being ordered must cost what the customer was quoted.
       // Catches a wrong planId (several plans share a name). Done before any side effects.
       const quoted = priceNumber(input.confirmedPrice);
-      const expected = resellerPlan || applyDiscount(basePlan, input.discountCode);
-      const candidates = (resellerPlan ? [resellerPlan.pricePHP] : [expected.pricePHP, basePlan.pricePHP]).map((n) => Math.round(n * 100) / 100);
+      const bonusPHP = resellerPlan ? 0 : await newFbBonusFor(senderId, basePlan.pricePHP);
+      const expected = resellerPlan || applyPromos(basePlan, applyDiscount(basePlan, input.discountCode), bonusPHP);
+      const bonusOnly = bonusPHP > 0 ? applyPromos(basePlan, null, bonusPHP).pricePHP : basePlan.pricePHP;
+      const candidates = (resellerPlan ? [resellerPlan.pricePHP] : [expected.pricePHP, basePlan.pricePHP, bonusOnly]).map((n) => Math.round(n * 100) / 100);
       if (quoted === null || !candidates.includes(quoted)) {
         console.warn(`[order] price mismatch: planId ${input.planId} costs ${expected.price}, bot quoted ${input.confirmedPrice}`);
         return {
@@ -609,8 +679,9 @@ async function runTool(name, input, senderId) {
       }
 
       // Discount: only one per customer, ever. Record it now (atomically) so it can't be used twice.
-      let plan = resellerPlan || applyDiscount(basePlan, input.discountCode);
+      let codeRes = resellerPlan ? null : applyDiscount(basePlan, input.discountCode);
       let discountNote = resellerPlan ? `Reseller price (retail ${basePlan.price}).\n` : "";
+      let plan = resellerPlan || applyPromos(basePlan, codeRes, bonusPHP);
       if (resellerPlan) {
         // no discount codes for resellers
       } else if (plan.discountCode) {
@@ -619,7 +690,7 @@ async function runTool(name, input, senderId) {
           if (!ok) {
             const used = await getUsedDiscount(senderId).catch(() => null);
             discountNote = `Note: customer tried ${plan.discountCode} but already used a discount${used && used.code ? ` (${used.code})` : ""}; regular price charged.\n`;
-            plan = { ...basePlan, discountError: alreadyUsedMessage(used) };
+            plan = { ...applyPromos(basePlan, null, bonusPHP), discountError: alreadyUsedMessage(used) };
           }
         } catch (err) {
           console.error("[discount] could not record discount:", err.message);
@@ -629,6 +700,10 @@ async function runTool(name, input, senderId) {
         discountNote = `Note: customer tried an invalid code (${input.discountCode}); regular price charged.\n`;
       }
 
+      if (plan.newCustomerBonusPHP > 0) {
+        discountNote += `Holiday ₱${plan.newCustomerBonusPHP} new Messenger customer bonus applied.\n`;
+        if (hasDb()) await redis(["SET", `promo:fbnew:${senderId}`, String(Date.now()), "NX"]).catch(() => {});
+      }
       const methodName = PAYMENT_METHODS[methodKey];
 
       // Gold reseller paying from their prepaid wallet: no QR, the admin deducts it.
