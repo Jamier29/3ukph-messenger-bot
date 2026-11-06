@@ -524,7 +524,8 @@ const TOOLS = [
   {
     name: "create_order",
     description:
-      "Place the order once you know: the exact plan (planId), the payment method, and the customer's email. " +
+      "Place the order once you know: the exact plan (planId), how many eSIMs of it (quantity), the payment method, and the customer's email. " +
+      "If they want several eSIMs of the same plan (family, barkada, group), use quantity in ONE order and tell them the total (price x quantity). " +
       "This sends the customer the payment QR code for their chosen method (or the PayPal link and USD amount " +
       "for PayPal) and alerts the admin.",
     input_schema: {
@@ -534,6 +535,7 @@ const TOOLS = [
         confirmedPrice: { type: "string", description: "The exact peso price you last quoted the customer for this plan, from get_plan (e.g. '₱1,037.88', the discounted price if a code was accepted, or the resellerPrice for an approved reseller)." },
         paymentMethod: { type: "string", enum: ["GCash", "Maya", "MariBank", "UnionBank", "BPI", "QR Ph", "Card", "PayPal", "Wallet"], description: "\"Wallet\" is only for approved Gold resellers paying from their prepaid reseller wallet. \"QR Ph\" = scan to pay with GCash, Maya or any bank app." },
         email: { type: "string", description: "Email address where the eSIM QR code should be sent." },
+        quantity: { type: "integer", minimum: 1, maximum: 10, description: "How many eSIMs of this SAME plan (e.g. 3 for a family of 3). Default 1. confirmedPrice stays the price of ONE eSIM; the total is charged in one payment and each eSIM gets its own QR code. For different plans, place separate orders." },
         deliverVia: { type: "string", enum: ["Messenger", "Email", "Both"], description: "How the customer wants the eSIM QR code." },
         discountCode: { type: "string", description: "The discount code the customer gave, if any (only one that get_plan accepted)." },
         notes: { type: "string", description: "Anything else useful, e.g. 'eSIM is for a friend', travel dates, phone model." }
@@ -704,14 +706,23 @@ async function runTool(name, input, senderId) {
         discountNote += `Holiday ₱${plan.newCustomerBonusPHP} new Messenger customer bonus applied.\n`;
         if (hasDb()) await redis(["SET", `promo:fbnew:${senderId}`, String(Date.now()), "NX"]).catch(() => {});
       }
+      // Several eSIMs of the same plan in one order: one payment for the total, one QR per eSIM.
+      const qty = Math.max(1, Math.min(10, parseInt(input.quantity, 10) || 1));
+      if (qty > 1) {
+        const unitNoBonus = resellerPlan ? plan.pricePHP : applyPromos(basePlan, plan.discountCode ? codeRes : null, 0).pricePHP;
+        const total = Math.round((unitNoBonus * (qty - 1) + plan.pricePHP) * 100) / 100; // new-customer bonus counts once
+        plan = { ...plan, quantity: qty, unitPrice: plan.price, unitPricePHP: plan.pricePHP, price: formatPHP(total), pricePHP: total, name: plan.name };
+        discountNote += `Quantity: ${qty} eSIMs (${formatPHP(unitNoBonus)} each).\n`;
+      }
+      const qtyLabel = qty > 1 ? `${qty} x ` : "";
       const methodName = PAYMENT_METHODS[methodKey];
 
       // Gold reseller paying from their prepaid wallet: no QR, the admin deducts it.
       if (methodKey === "wallet") {
-        const planLabel = `${plan.name} (${plan.destination}, ${plan.data}, ${plan.validityDays} days${plan.callsAndTexts ? ", with calls & texts" : ""})`;
+        const planLabel = `${qtyLabel}${plan.name} (${plan.destination}, ${plan.data}, ${plan.validityDays} days${plan.callsAndTexts ? ", with calls & texts" : ""})`;
         let w;
         try {
-          w = await reseller.walletOrder(senderId, { pricePHP: plan.pricePHP, plan: planLabel, retailPHP: basePlan.pricePHP, email });
+          w = await reseller.walletOrder(senderId, { pricePHP: plan.pricePHP, plan: planLabel, retailPHP: basePlan.pricePHP * qty, email });
         } catch (err) {
           console.error("[wallet] order failed:", err.message);
           return { error: "The wallet system couldn't be reached. Ask the reseller to pay another way this time, or hand off to the admin." };
@@ -744,8 +755,8 @@ async function runTool(name, input, senderId) {
       // Reseller paying by GCash/bank/PayPal: log the purchase in their history (balance unchanged).
       if (resellerPlan) {
         reseller.logOrder(senderId, {
-          pricePHP: plan.pricePHP, retailPHP: basePlan.pricePHP, method: methodName, email,
-          plan: `${plan.name} (${plan.destination}, ${plan.data}, ${plan.validityDays} days${plan.callsAndTexts ? ", with calls & texts" : ""})`
+          pricePHP: plan.pricePHP, retailPHP: basePlan.pricePHP * qty, method: methodName, email,
+          plan: `${qtyLabel}${plan.name} (${plan.destination}, ${plan.data}, ${plan.validityDays} days${plan.callsAndTexts ? ", with calls & texts" : ""})`
         }).catch((err) => console.error("[wallet] could not log order:", err.message));
       }
 
@@ -762,7 +773,7 @@ async function runTool(name, input, senderId) {
           title: `New ${resellerTag}order: ${usdText} via PayPal`,
           message:
             `Customer: ${customer}\n` +
-            `Plan: ${plan.name} (${plan.destination}, ${plan.data}, ${plan.validityDays} days${plan.callsAndTexts ? ", with calls & texts" : ""})\n` +
+            `Plan: ${qtyLabel}${plan.name} (${plan.destination}, ${plan.data}, ${plan.validityDays} days${plan.callsAndTexts ? ", with calls & texts" : ""})\n` +
             `Amount to receive on PayPal: ${usdText} (peso price ${plan.price}${PAYPAL_EXTRA_PERCENT ? ` + ${PAYPAL_EXTRA_PERCENT}% PayPal fee` : ""})\n` +
             (plan.discountCode ? `Discount: ${plan.discountCode} (${plan.discountPercent}% off ${plan.regularPrice})\n` : "") +
             discountNote +
@@ -796,21 +807,21 @@ async function runTool(name, input, senderId) {
       if (pm.configured() && PUBLIC_URL && pmAllowedFor(senderId) && ["gcash", "maya", "maribank", "unionbank", "bpi", "qrph", "card"].includes(methodKey)) {
         try {
           const ref = "3UK-" + Date.now().toString(36).toUpperCase();
-          const planLabel = `${plan.name} (${plan.destination}, ${plan.data}, ${plan.validityDays} days${plan.callsAndTexts ? ", with calls & texts" : ""})`;
+          const planLabel = `${qtyLabel}${plan.name} (${plan.destination}, ${plan.data}, ${plan.validityDays} days${plan.callsAndTexts ? ", with calls & texts" : ""})`;
           const types = methodKey === "card" ? ["card"] : pm.methods();
           const co = await pm.createCheckout({
-            amountPHP: plan.pricePHP, name: `eSIM ${plan.name}`, description: `3UK Philippines eSIM: ${planLabel}`,
+            amountPHP: plan.pricePHP, name: `${qty > 1 ? qty + " x " : ""}eSIM ${plan.name}`, description: `3UK Philippines eSIM: ${planLabel}`,
             reference: ref, successUrl: `${PUBLIC_URL}/paid`, cancelUrl: `${PUBLIC_URL}/chat`, metadata: { ref, psid: senderId }, types
           });
           await pmSaveOrder(co.id, {
             ref, psid: senderId, planId: plan.planId, planName: plan.name, planLabel, pricePHP: plan.pricePHP, amount: co.amount,
-            email, method: methodName, reseller: !!resellerPlan, discount: plan.discountCode || null, createdAt: Date.now(), status: "pending"
+            email, method: methodName, reseller: !!resellerPlan, discount: plan.discountCode || null, createdAt: Date.now(), status: "pending", quantity: qty
           });
           const howTo = types.includes("qrph")
             ? "Scan the QR Ph code on the page with GCash, Maya or any bank app (InstaPay)."
             : "Choose your payment method on the page.";
           await sendText(senderId,
-            `💳 Secure payment link (${plan.price}):\n${co.url}\n\n${howTo}\n` +
+            `💳 Secure payment link (${qty > 1 ? `${qty} eSIMs, ` : ""}${plan.price}):\n${co.url}\n\n${howTo}\n` +
             "✅ No screenshot needed: once paid, your eSIM QR code is sent here automatically within a few minutes." +
             (pm.isTest() ? "\n\n[TEST MODE: no real payment]" : ""));
           const customer = await getCustomerName(senderId);
@@ -828,7 +839,7 @@ async function runTool(name, input, senderId) {
             instructionsForYou:
               `A secure payment link for exactly ${plan.price} was just sent to the customer (do not repeat the link). ` +
               `Briefly tell them to open it and pay${types.includes("qrph") ? " by scanning the QR Ph code with GCash, Maya or any bank app" : ""}. ` +
-              "Their eSIM QR code will arrive here automatically within a few minutes after payment, so they do NOT need to send a screenshot. " +
+              (qty > 1 ? `All ${qty} eSIMs (one QR code each) will arrive here automatically within a few minutes after payment, so they do NOT need to send a screenshot. ` : "Their eSIM QR code will arrive here automatically within a few minutes after payment, so they do NOT need to send a screenshot. ") +
               "If they have trouble paying, hand off to the admin."
           };
         } catch (err) {
@@ -860,7 +871,7 @@ async function runTool(name, input, senderId) {
         title: `New ${resellerTag}order: ${plan.price} via ${methodName}`,
         message:
           `Customer: ${customer}\n` +
-          `Plan: ${plan.name} (${plan.destination}, ${plan.data}, ${plan.validityDays} days${plan.callsAndTexts ? ", with calls & texts" : ""})\n` +
+          `Plan: ${qtyLabel}${plan.name} (${plan.destination}, ${plan.data}, ${plan.validityDays} days${plan.callsAndTexts ? ", with calls & texts" : ""})\n` +
           (plan.discountCode
             ? `Price: ${plan.price} (code ${plan.discountCode}: ${plan.discountPercent}% off ${plan.regularPrice}, saves ${plan.discountAmount})\n` +
               (plan.discountCode === "WELCOME10"
@@ -1562,10 +1573,10 @@ async function deliverEsim(psid, planId, opts = {}) {
     if (sim.lpa) {
       try { png = brandedQr(sim.lpa, sim.iccid); } // 3UK-branded card; falls back to a plain QR
       catch (e) { console.error("[deliver] branded QR failed:", e.message); png = await QRCode.toBuffer(sim.lpa, { width: 720, margin: 3, errorCorrectionLevel: "M" }); }
-      await adminSendImage(psid, png, "image/png", `Your eSIM QR code: ${plan.name}`);
+      await adminSendImage(psid, png, "image/png", `${opts.label ? opts.label + ": " : ""}Your eSIM QR code: ${plan.name}`);
       steps.push("qr");
     }
-    const lines = [`✅ Your eSIM is ready! ${plan.name}`, "", "📲 How to install (on Wi-Fi, before you travel):", "1️⃣ Easiest: scan the QR code above using your phone's eSIM settings (show it on another screen or ask someone to show it)."];
+    const lines = [`✅ ${opts.label ? opts.label + " is" : "Your eSIM is"} ready! ${plan.name}`, "", "📲 How to install (on Wi-Fi, before you travel):", "1️⃣ Easiest: scan the QR code above using your phone's eSIM settings (show it on another screen or ask someone to show it)."];
     lines.push("2️⃣ Only this one phone? Save the QR image. iPhone: open it in Photos, press and hold the QR, tap \"Add eSIM\". Android: Settings › SIM manager › Add eSIM › Scan QR › tap the gallery icon and pick the image.");
     if (sim.smdp && sim.matching) lines.push("", "Or type it in manually (Add eSIM › Enter details manually):", `SM-DP+ address: ${sim.smdp}`, `Activation code: ${sim.matching}`);
     if (sim.iccid) lines.push("", `🔖 ICCID: ${sim.iccid}`);
@@ -1714,10 +1725,26 @@ async function handlePaidCheckout(id, source) {
     if (order.pricePHP > AUTO_DELIVER_MAX_PHP) return manual(`Order is above the auto-delivery limit of ${formatPHP(AUTO_DELIVER_MAX_PHP)}.`);
     if ((await pmDailyCount()) > AUTO_DELIVER_DAILY_MAX) return manual(`Daily auto-delivery limit (${AUTO_DELIVER_DAILY_MAX}) reached.`);
     try {
-      await adminSendText(psid, `✅ Payment received (${formatPHP(order.pricePHP)}). Thank you! Preparing your eSIM now... ⏳`);
+      await adminSendText(psid, `✅ Payment received (${formatPHP(order.pricePHP)}). Thank you! Preparing your ${Number(order.quantity) > 1 ? order.quantity + " eSIMs" : "eSIM"} now... ⏳`);
       told = true;
-      const r = await deliverEsim(psid, order.planId, { auto: true, paidPHP: order.pricePHP, reference: order.ref, method: order.method ? `${order.method} (PayMongo)` : "PayMongo", email: order.email });
-      await pmUpdateOrder(id, { status: "delivered", deliveredAt: Date.now(), iccid: r.iccid || null, costUSD: r.costUSD || null });
+      const qty = Math.max(1, Number(order.quantity) || 1);
+      const iccids = [];
+      let costTotal = 0;
+      for (let i = 1; i <= qty; i++) {
+        try {
+          const r = await deliverEsim(psid, order.planId, {
+            auto: true, paidPHP: Math.round((order.pricePHP / qty) * 100) / 100, reference: qty > 1 ? `${order.ref}-${i}` : order.ref,
+            method: order.method ? `${order.method} (PayMongo)` : "PayMongo", email: order.email, label: qty > 1 ? `eSIM ${i} of ${qty}` : ""
+          });
+          iccids.push(r.iccid || null); costTotal += Number(r.costUSD) || 0;
+          await pmUpdateOrder(id, { delivered: i, iccids });
+        } catch (e) {
+          console.error(`[paymongo] auto-delivery ${i}/${qty} failed:`, e.message);
+          return manual((qty > 1 ? `${i - 1} of ${qty} eSIMs were delivered; eSIM ${i} and after still need delivering. ` : "") +
+            (e.bought ? "⚠️ The eSIM WAS bought but the QR didn't come back -- check eSIMCard > My eSIMs, don't buy again. " : "") + e.message);
+        }
+      }
+      await pmUpdateOrder(id, { status: "delivered", deliveredAt: Date.now(), iccid: iccids[0] || null, iccids, costUSD: costTotal || null });
     } catch (e) {
       console.error("[paymongo] auto-delivery failed:", e.message);
       return manual((e.bought ? "⚠️ The eSIM WAS bought but the QR didn't come back -- check eSIMCard > My eSIMs, don't buy again. " : "") + e.message);
