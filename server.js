@@ -68,6 +68,7 @@ const ExcelJS = require("exceljs");
 const reseller = require("./reseller");
 const capi = require("./capi");
 const guard = require("./guard");
+const partners = require("./partners");
 const kit = require("./marketingKit");
 const pm = require("./paymongo");
 const { tripContext } = require("./tripAdvisor");
@@ -319,6 +320,7 @@ function applyPromos(plan, codeResult, bonusPHP) {
 function applyDiscount(plan, code) {
   if (!plan || !code) return plan;
   const key = String(code).trim().toUpperCase().replace(/\s+/g, "");
+  if (partners.isCode(key) && !DISCOUNT_CODES[key]) return { ...plan, partnerCode: key, promoNote: `${key} is a partner referral code (${partners.info(key).name}). It gives no discount; the order is credited to the partner. Quote the regular price and thank them.` };
   const pct = DISCOUNT_CODES[key];
   if (!pct) return { ...plan, discountError: `"${code}" is not a valid discount code. Quote the regular price.` };
   const winErr = codeWindowError(key);
@@ -400,6 +402,7 @@ async function checkDiscountDb() {
 reseller.init(UPSTASH_URL && UPSTASH_TOKEN ? redis : null);
 capi.init(UPSTASH_URL && UPSTASH_TOKEN ? redis : null);
 guard.init(UPSTASH_URL && UPSTASH_TOKEN ? redis : null);
+partners.init(UPSTASH_URL && UPSTASH_TOKEN ? redis : null);
 kit.init({ redis: UPSTASH_URL && UPSTASH_TOKEN ? redis : null, callClaude: (sys, user, max) => callClaudeText(sys, user, max, 0.9), findPlans: (q, n) => findPlansByText(q, n) });
 esims.init(UPSTASH_URL && UPSTASH_TOKEN ? redis : null);
 
@@ -1643,12 +1646,29 @@ async function deliverEsim(psid, planId, opts = {}) {
   } finally { deliveryLocks.delete(psid); }
 }
 
+// Partner statements: /admin/api/partners?month=YYYY-MM (Manila). No month = all time.
+app.get("/admin/api/partners", requireAdmin, async (req, res) => {
+  const month = /^\d{4}-\d{2}$/.test(String(req.query.month || "")) ? String(req.query.month) : null;
+  const out = [];
+  for (const p of partners.list()) out.push(await partners.statement(p.code, month));
+  res.json({ month: month || "all", partners: out });
+});
+
 app.post("/admin/api/deliver", requireAdmin, async (req, res) => {
   const b = req.body || {};
   const psid = String(b.psid || "");
   if (!/^(wa)?\d+$/.test(psid)) return res.status(400).json({ error: "Pick a conversation first." });
   try {
-    res.json(await deliverEsim(psid, b.planId, { packageId: b.packageId }));
+    const result = await deliverEsim(psid, b.planId, { packageId: b.packageId });
+    // Manual (console) delivery = paid outside PayMongo: credit the partner with the quoted price.
+    (async () => {
+      const lo = await getLastOrder(psid);
+      const plan = getPlan(b.planId);
+      const quoted = lo && Number(String(lo.price || "").replace(/[^0-9.]/g, ""));
+      const amount = quoted > 0 && lo.planId === String(b.planId) ? quoted : plan && plan.pricePHP;
+      await creditPartner(psid, result.iccid || `manual-${psid}-${Date.now()}`, amount, plan && plan.name, 1);
+    })().catch(() => {});
+    res.json(result);
   } catch (e) {
     console.error("[deliver] failed:", e.message);
     res.status(e.status || 502).json({ error: e.message, ...(e.bought ? { bought: true } : {}) });
@@ -1747,6 +1767,7 @@ async function handlePaidCheckout(id, source) {
       return;
     }
     capi.sendPurchase({ psid, valuePHP: order.pricePHP, email: order.email, ref: order.ref, planName: order.planName }).catch(() => {});
+    creditPartner(psid, order.ref, order.pricePHP, order.planName, order.quantity).catch(() => {});
     if (!AUTO_DELIVER) return manual("Automatic delivery is switched off (AUTO_DELIVER=off).");
     if (order.pricePHP > AUTO_DELIVER_MAX_PHP) return manual(`Order is above the auto-delivery limit of ${formatPHP(AUTO_DELIVER_MAX_PHP)}.`);
     if ((await pmDailyCount()) > AUTO_DELIVER_DAILY_MAX) return manual(`Daily auto-delivery limit (${AUTO_DELIVER_DAILY_MAX}) reached.`);
@@ -2738,6 +2759,10 @@ async function handleMessagingEvent(event) {
   if (adRef && event.sender && event.sender.id && (adRef.ad_id || adRef.source === "ADS")) {
     capi.rememberReferral(String(event.sender.id), { ad_id: adRef.ad_id || null, source: adRef.source || null }).catch(() => {});
   }
+  // Partner referral link: m.me/<page>?ref=CODE
+  if (adRef && adRef.ref && event.sender && event.sender.id && partners.isCode(adRef.ref)) {
+    partners.attach(String(event.sender.id), adRef.ref, "messenger link").catch(() => {});
+  }
 
   // Echo = a message the PAGE sent. If the bot didn't send it, an admin
   // typed it in the inbox -> pause the bot in that chat so they don't talk over each other.
@@ -2804,6 +2829,7 @@ async function handleMessagingEvent(event) {
 
 // Chat-tripper guard: customers who ordered before and resellers are never limited.
 async function guardAllows(senderId, text) {
+  await partners.noteText(senderId, text).catch(() => {});
   let exempt = false;
   try {
     const rec = await getCustomerRecord(senderId);
@@ -2814,6 +2840,15 @@ async function guardAllows(senderId, text) {
   console.log(`[guard] not answering ${senderId} (${g.reason})`);
   if (g.notice) await sendText(senderId, g.notice);
   return false;
+}
+
+// Credits a paid order to the customer's referral partner (resellers' own purchases don't count).
+async function creditPartner(psid, orderRef, amountPHP, planName, quantity) {
+  if (await getResellerSafe(psid)) return null;
+  const r = await partners.recordPaid({ senderId: psid, orderRef, amountPHP, plan: planName, quantity });
+  if (r) notifyAdmin({ title: `🤝 Partner sale: ${r.partner.name}`, tags: "handshake",
+    message: `${formatPHP(r.rec.amountPHP)} ${r.rec.plan}\nCommission ${r.partner.pct}%: ${formatPHP(r.rec.commissionPHP)} (ref ${r.rec.orderRef})` }).catch(() => {});
+  return r;
 }
 
 // Adds a note to the chat history so the AI knows something happened (e.g. an image was sent).

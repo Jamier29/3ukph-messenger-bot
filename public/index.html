@@ -1741,8 +1741,10 @@ nav a.uk-btn-ghost{white-space:nowrap}
   var back=document.getElementById('ccBack'), wa=document.getElementById('ccWa'), fb=document.getElementById('ccFb'), sub=document.getElementById('ccSub');
   var defSub=sub.textContent, lastFocus=null;
   function open(text){
-    wa.href=WA+'&text='+encodeURIComponent(text||'Hi 3UK Philippines! I would like to get an eSIM.');
-    fb.href=FB;
+    var P=window.__PARTNER;
+    var msg=(text||'Hi 3UK Philippines! I would like to get an eSIM.')+(P?'\nPartner: '+P.code:'');
+    wa.href=WA+'&text='+encodeURIComponent(msg);
+    fb.href=P?'https://m.me/103294518884622?ref='+P.code:FB;
     sub.textContent=text?'Your plan is typed in for you on WhatsApp, just press send. On Messenger, paste it (already copied).':defSub;
     lastFocus=document.activeElement; back.classList.add('open'); back.setAttribute('aria-hidden','false'); wa.focus();
   }
@@ -1822,6 +1824,28 @@ nav a.uk-btn-ghost{white-space:nowrap}
   document.getElementById('pwaIosOk').onclick = function(){ ios.classList.remove('on'); snooze(); };
   ios.addEventListener('click', function(e){ if (e.target === ios) ios.classList.remove('on'); });
   document.addEventListener('click', function(e){ var a = e.target.closest && e.target.closest('[data-install]'); if (!a) return; e.preventDefault(); install(); });
+})();
+</script>
+<!-- partner referral (?ref=CODE): co-brand bar + credit the partner in chat -->
+<style>
+.pbar{display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap;padding:10px 16px;background:#fff;border-bottom:3px solid #ff0a2b;font:600 14px/1.3 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#1e3a8a;text-align:center}
+.pbar img{height:22px;width:auto;display:block}
+.pbar .x{color:#94a3b8;font-weight:400}
+.pbar small{display:block;width:100%;font-weight:400;color:#475569;font-size:12.5px}
+</style>
+<script>
+(function(){
+  var PARTNERS={TRIPHAPPY:{code:'TRIPHAPPY',name:'TRIPHAPPY.PH',logo:'/partners/triphappy-logo.png'}};
+  var KEY='3uk_partner',DAYS=60,p=null;
+  try{var q=new URLSearchParams(location.search).get('ref');var c=q&&q.toUpperCase().replace(/[^A-Z0-9]/g,'');
+    if(c&&PARTNERS[c]){p=PARTNERS[c];localStorage.setItem(KEY,JSON.stringify({code:c,at:Date.now()}));}
+    else{var s=JSON.parse(localStorage.getItem(KEY)||'null');if(s&&PARTNERS[s.code]&&Date.now()-s.at<DAYS*864e5)p=PARTNERS[s.code];}
+  }catch(e){}
+  if(!p)return;
+  window.__PARTNER=p;
+  var bar=document.createElement('div');bar.className='pbar';bar.setAttribute('role','note');
+  bar.innerHTML='<span>3UK Philippines</span><span class="x">\u00d7</span><img alt="'+p.name+'" src="'+p.logo+'"><small>Official eSIM partner of '+p.name+'. Order below and our assistant will take care of you.</small>';
+  document.body.insertBefore(bar,document.body.firstChild);
 })();
 </script>
 </body>
