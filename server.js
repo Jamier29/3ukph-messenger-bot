@@ -1719,7 +1719,11 @@ async function deliverEsim(psid, planId, opts = {}) {
 app.get("/admin/api/partners", requireAdmin, async (req, res) => {
   const month = /^\d{4}-\d{2}$/.test(String(req.query.month || "")) ? String(req.query.month) : null;
   const out = [];
-  for (const p of partners.list()) out.push(await partners.statement(p.code, month));
+  for (const p of partners.list()) {
+    const st = await partners.statement(p.code, month);
+    for (const r of st.rows) r.customerName = await getCustomerName(r.customer).catch(() => r.customer);
+    out.push(st);
+  }
   res.json({ month: month || "all", partners: out });
 });
 

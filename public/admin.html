@@ -207,6 +207,21 @@
     </section>
 
 
+    <!-- Referral partners -->
+    <section class="card">
+      <span class="step">Partners</span>
+      <h2>Partner sales &amp; commission</h2>
+      <p class="help">Paid orders from customers who came through a partner's link or code (e.g. TRIPHAPPY). Commission is computed on the amount paid. Resellers' own orders are not counted.</p>
+      <div class="row" style="margin-bottom:10px">
+        <label style="display:flex;align-items:center;gap:6px">Month <input type="month" id="ptMonth" style="max-width:170px"></label>
+        <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="ptAll"> All time</label>
+        <button class="ghost" id="ptLoad">Show</button>
+        <button class="ghost" id="ptCsv">⬇ Download CSV</button>
+      </div>
+      <div class="status" id="ptStatus"></div>
+      <div id="ptList" class="help scrollbox">Loading…</div>
+    </section>
+
     <!-- Reseller Marketing Kit -->
     <section class="card">
       <span class="step">Marketing Kit</span>
@@ -319,7 +334,7 @@
       $("pageBox").innerHTML = (p.picture ? '<img src="' + esc(p.picture) + '" alt="">' : "") +
         '<div><b style="font-size:18px">' + esc(p.name) + '</b><br><span class="help">' + esc(p.category) + ' · Page ID ' + esc(p.id) +
         '</span><br><span class="badge ok">✓ Connected to Messenger</span></div>';
-      loadConversations(); loadPending(); loadKit();
+      loadConversations(); loadPending(); loadKit(); loadPartners();
       loadResellers();
     }).catch(function (e) {
       $("loginStatus").textContent = e.message; $("loginStatus").className = "status err";
@@ -554,6 +569,47 @@
       .then(function (r) { if (!r.ok) throw new Error(); return r.blob(); })
       .then(function (b) { el.src = URL.createObjectURL(b); }).catch(function () { el.alt = "Preview unavailable"; });
   }
+
+  // ---- Referral partners ----
+  var ptData = null;
+  (function () { var d = new Date(Date.now() + 8 * 3600000); $("ptMonth").value = d.toISOString().slice(0, 7); })();
+  function peso(n) { return "₱" + Number(n || 0).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function loadPartners() {
+    var m = $("ptAll").checked ? "" : $("ptMonth").value;
+    $("ptList").textContent = "Loading…";
+    api("/admin/api/partners" + (m ? "?month=" + encodeURIComponent(m) : "")).then(function (d) {
+      ptData = d;
+      if (!d.partners || !d.partners.length) { $("ptList").textContent = "No partners set up."; return; }
+      $("ptList").innerHTML = d.partners.map(function (p) {
+        var head = "<p><b>" + esc(p.partner.name) + "</b> (" + esc(p.partner.code) + ", " + p.partner.pct + "%) · " + (d.month === "all" ? "All time" : esc(d.month)) +
+          "<br>Orders: <b>" + p.orders + "</b> · Sales: <b>" + peso(p.salesPHP) + "</b> · Commission due: <b>" + peso(p.commissionPHP) + "</b></p>";
+        if (!p.rows.length) return head + "<p>No paid orders yet.</p>";
+        return head + "<table style='width:100%;border-collapse:collapse;font-size:13px'><tr><th align=left>Date</th><th align=left>Customer</th><th align=left>Plan</th><th align=right>Paid</th><th align=right>Commission</th></tr>" +
+          p.rows.slice().reverse().map(function (r) {
+            return "<tr><td>" + esc(fmt(r.at)) + "</td><td>" + esc(r.customerName || r.customer) + "</td><td>" + esc((r.quantity > 1 ? r.quantity + " × " : "") + r.plan) +
+              "</td><td align=right>" + peso(r.amountPHP) + "</td><td align=right>" + peso(r.commissionPHP) + "</td></tr>";
+          }).join("") + "</table>";
+      }).join("<hr>");
+    }).catch(function (e) { $("ptList").textContent = "Couldn't load: " + e.message; });
+  }
+  $("ptLoad").onclick = loadPartners;
+  $("ptAll").onchange = loadPartners;
+  $("ptMonth").onchange = function () { $("ptAll").checked = false; loadPartners(); };
+  $("ptCsv").onclick = function () {
+    if (!ptData) return;
+    var q = function (v) { v = v == null ? "" : String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+    var lines = [["Partner", "Date (Manila)", "Order ref", "Customer", "Plan", "Qty", "Amount paid (PHP)", "Commission %", "Commission (PHP)"].join(",")];
+    ptData.partners.forEach(function (p) {
+      p.rows.forEach(function (r) {
+        var dt = new Date(new Date(r.at).getTime() + 8 * 3600000).toISOString().replace("T", " ").slice(0, 16);
+        lines.push([p.partner.name, dt, r.orderRef, r.customerName || r.customer, r.plan, r.quantity || 1, r.amountPHP.toFixed(2), r.pct, r.commissionPHP.toFixed(2)].map(q).join(","));
+      });
+      lines.push([p.partner.name + " TOTAL", "", "", "", "", p.orders, p.salesPHP.toFixed(2), p.partner.pct, p.commissionPHP.toFixed(2)].map(q).join(","));
+    });
+    var blob = new Blob(["\ufeff" + lines.join("\n")], { type: "text/csv" });
+    var a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+    a.download = "3UK-partner-commission-" + (ptData.month || "all") + ".csv"; document.body.appendChild(a); a.click(); a.remove();
+  };
   function loadKit() {
     api("/admin/api/kit").then(function (d) {
       kitData = d;
