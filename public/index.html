@@ -447,11 +447,16 @@ footer a{color:#fff}
 (function(){
   var PARTNERS={TRIPHAPPY:{code:'TRIPHAPPY',name:'TRIPHAPPY.PH',logo:'/partners/triphappy-logo.png'}};
   var KEY='3uk_partner',DAYS=365,p=null;
+  // The partner page (banner, Buy now, no promos) shows ONLY when the link has ?ref=CODE.
+  // A visitor who came from a partner before still gets credited when they chat from the normal site,
+  // but sees the normal 3ukph.com.
+  var silent=null;
   try{var q=new URLSearchParams(location.search).get('ref');var c=q&&q.toUpperCase().replace(/[^A-Z0-9]/g,'');
     if(c&&PARTNERS[c]){p=PARTNERS[c];localStorage.setItem(KEY,JSON.stringify({code:c,at:Date.now()}));}
-    else{var s=JSON.parse(localStorage.getItem(KEY)||'null');if(s&&PARTNERS[s.code]&&Date.now()-s.at<DAYS*864e5)p=PARTNERS[s.code];}
+    else{var s=JSON.parse(localStorage.getItem(KEY)||'null');if(s&&PARTNERS[s.code]&&Date.now()-s.at<DAYS*864e5)silent=PARTNERS[s.code];}
   }catch(e){}
   if(p){window.__PARTNER=p;document.documentElement.classList.add('partner');}
+  window.__PARTNER_REF=p||silent;
 })();
 </script>
 <style>
@@ -1760,7 +1765,7 @@ nav a.uk-btn-ghost{white-space:nowrap}
   var back=document.getElementById('ccBack'), wa=document.getElementById('ccWa'), fb=document.getElementById('ccFb'), sub=document.getElementById('ccSub');
   var defSub=sub.textContent, lastFocus=null;
   function open(text){
-    var P=window.__PARTNER;
+    var P=window.__PARTNER_REF;
     var msg=(text||'Hi 3UK Philippines! I would like to get an eSIM.')+(P?'\nPartner: '+P.code:'');
     wa.href=WA+'&text='+encodeURIComponent(msg);
     fb.href=P?'https://m.me/103294518884622?ref='+P.code:FB;
