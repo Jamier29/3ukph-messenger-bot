@@ -164,7 +164,28 @@ async function ensureReferralSubscription() {
     console.log("[referrals] messaging_referrals:", referralSubStatus, "fields:", [...fields].join(","));
   } catch (e) { referralSubStatus = "check error: " + e.message; }
 }
-resolvePageToken().then(ensureReferralSubscription);
+// New Messenger chats start with a "Get Started" button: when someone opens a partner link (m.me/...?ref=CODE),
+// Facebook includes the ref in that tap, so partner sales count even if the customer never types the code.
+// Only added if the Page has none yet (an existing Get Started setup is left alone).
+let getStartedStatus = "checking";
+async function ensureGetStarted() {
+  if (!/^ok/.test(pageTokenStatus)) { getStartedStatus = "skipped"; return; }
+  try {
+    const base = `https://graph.facebook.com/v21.0/me/messenger_profile?access_token=${encodeURIComponent(PAGE_ACCESS_TOKEN)}`;
+    const r = await fetch(base + "&fields=get_started,greeting");
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { getStartedStatus = "check failed: " + ((d.error && d.error.message) || r.status); return; }
+    const cur = (d.data || [])[0] || {};
+    if (cur.get_started) { getStartedStatus = "on"; return; }
+    const body = { get_started: { payload: "GET_STARTED" } };
+    if (!cur.greeting) body.greeting = [{ locale: "default", text: "Hi {{user_first_name}}! 👋 Travel eSIMs for your trips abroad, delivered in minutes. Tap Get Started and our assistant will help you choose." }];
+    const u = await fetch(base, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const ud = await u.json().catch(() => ({}));
+    getStartedStatus = u.ok && ud.result === "success" ? "on (just added)" : "add failed: " + ((ud.error && ud.error.message) || u.status);
+    console.log("[messenger] Get Started:", getStartedStatus);
+  } catch (e) { getStartedStatus = "error: " + e.message; }
+}
+resolvePageToken().then(ensureReferralSubscription).then(ensureGetStarted);
 if (!ADMIN_NTFY_TOPIC) {
   console.warn("[startup] ADMIN_NTFY_TOPIC not set -- admin phone alerts are OFF (alerts will only appear in the Render logs).");
 }
@@ -2877,7 +2898,7 @@ app.post("/admin/api/resume-bot", requireAdmin, (req, res) => {
 
 // Health check for uptime monitoring
 app.get("/health", (req, res) => {
-  res.send(`3UKPH Messenger bot is running. Catalog: ${listAllDestinations().length} destinations loaded. Messenger token: ${pageTokenStatus}. Purchase tracking: ${capi.configured() ? "on" : "off"}${capi.status().last.at ? " (last: " + capi.status().last.message + ")" : ""}. Partner links (Messenger): ${referralSubStatus}.`);
+  res.send(`3UKPH Messenger bot is running. Catalog: ${listAllDestinations().length} destinations loaded. Messenger token: ${pageTokenStatus}. Purchase tracking: ${capi.configured() ? "on" : "off"}${capi.status().last.at ? " (last: " + capi.status().last.message + ")" : ""}. Partner links (Messenger): ${referralSubStatus}; Get Started: ${getStartedStatus}.`);
 });
 
 // ---------------------------------------------------------------------
@@ -2964,6 +2985,8 @@ async function handleMessagingEvent(event) {
   // Button taps (e.g. "Get Started") arrive as postbacks.
   let text = message && message.text;
   if (!text && event.postback) text = event.postback.title || event.postback.payload;
+  // Came in through a partner link (e.g. m.me/...?ref=TRIPHAPPY) and tapped Get Started: tell the assistant.
+  if (event.postback && adRef && adRef.ref && partners.isCode(adRef.ref)) text = `${text} (Partner: ${String(adRef.ref).toUpperCase()})`;
 
   {
     const att = ((message && message.attachments) || []).find((a) => a.payload && a.payload.url);

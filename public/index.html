@@ -446,14 +446,19 @@ footer a{color:#fff}
 /* partner referral (?ref=CODE): decided before anything renders */
 (function(){
   var PARTNERS={TRIPHAPPY:{code:'TRIPHAPPY',name:'TRIPHAPPY.PH',logo:'/partners/triphappy-logo.png'}};
-  var KEY='3uk_partner',DAYS=60,p=null;
+  var KEY='3uk_partner',DAYS=365,p=null;
   try{var q=new URLSearchParams(location.search).get('ref');var c=q&&q.toUpperCase().replace(/[^A-Z0-9]/g,'');
     if(c&&PARTNERS[c]){p=PARTNERS[c];localStorage.setItem(KEY,JSON.stringify({code:c,at:Date.now()}));}
     else{var s=JSON.parse(localStorage.getItem(KEY)||'null');if(s&&PARTNERS[s.code]&&Date.now()-s.at<DAYS*864e5)p=PARTNERS[s.code];}
   }catch(e){}
-  if(p)window.__PARTNER=p;
+  if(p){window.__PARTNER=p;document.documentElement.classList.add('partner');}
 })();
 </script>
+<style>
+/* Partner page (?ref=CODE): clean, on-site buying only. No promos, app prompt or WhatsApp. */
+html.partner .promo,html.partner #followStrip,html.partner #vch,html.partner #pwaBar,html.partner #pwaIos,
+html.partner #ccWa,html.partner a[href*="wa.me"],html.partner a[href*="api.whatsapp.com"]{display:none!important}
+</style>
 </head>
 <body id="top" data-mode="land">
 <div class="promo" role="region" aria-label="Welcome offer"><div class="wrap">
@@ -1851,6 +1856,8 @@ nav a.uk-btn-ghost{white-space:nowrap}
 (function(){
   var p=window.__PARTNER;
   if(!p)return;
+  // Header button: buy on this page instead of leaving for a chat app.
+  try{var hb=document.querySelector('a.uk-btn-accent[href*="messenger.com/t/103294518884622"]');if(hb){hb.href='#finder';hb.textContent='Buy now';hb.removeAttribute('target');hb.addEventListener('click',function(e){e.stopImmediatePropagation();},true);}}catch(e){}
   var bar=document.createElement('div');bar.className='pbar';bar.setAttribute('role','note');
   bar.innerHTML='<span>3UK Philippines</span><span class="x">\u00d7</span><img alt="'+p.name+'" src="'+p.logo+'"><small>Official eSIM partner of '+p.name+'. Search your destination below, tap <b>Buy now</b>, pay online and get your eSIM by email in minutes.</small>';
   document.body.insertBefore(bar,document.body.firstChild);

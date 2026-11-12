@@ -4,14 +4,14 @@
 //   - they open our Messenger link with ?ref=CODE   (m.me/103294518884622?ref=TRIPHAPPY)
 //   - they come from our website opened with ?ref=CODE (the website adds "Partner: CODE" to the chat)
 //   - they type the partner code in any message (e.g. "TRIPHAPPY")
-// The link lasts LINK_DAYS (60). Every PAID order from a linked customer is recorded for that
+// The link lasts LINK_DAYS (365). Every PAID order from a linked customer is recorded for that
 // partner with its commission, so the console can show a monthly statement.
 // Partner codes give no discount; they only credit the partner.
 //
 // Render setting (optional): PARTNERS = "CODE:Display name:commission%,..."
 // default: "TRIPHAPPY:TRIPHAPPY.PH:8"
 
-const LINK_DAYS = Number(process.env.PARTNER_LINK_DAYS || 60);
+const LINK_DAYS = Number(process.env.PARTNER_LINK_DAYS || 365);
 
 const PARTNERS = {};
 for (const part of (process.env.PARTNERS || "TRIPHAPPY:TRIPHAPPY.PH:8").split(",")) {
