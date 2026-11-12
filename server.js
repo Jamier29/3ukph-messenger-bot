@@ -593,6 +593,18 @@ const TOOLS = [
     input_schema: { type: "object", properties: { iccid: { type: "string", description: "Optional ICCID the customer provided." } } }
   },
   {
+    name: "topup_wallet",
+    description:
+      "For approved resellers only: send a secure PayMongo payment link to top up their reseller wallet. The wallet is " +
+      "credited AUTOMATICALLY when they pay (no screenshot needed). A payment processing fee is added on top and paid by the reseller. " +
+      "Use when a reseller wants to top up / load / add funds to their wallet. Ask the amount first if they didn't say it.",
+    input_schema: {
+      type: "object",
+      properties: { amountPHP: { type: "number", description: "Amount to add to the wallet in PHP (before the fee), e.g. 5000." } },
+      required: ["amountPHP"]
+    }
+  },
+  {
     name: "check_wallet",
     description: "For approved resellers only: their current wallet balance and recent purchases. Use when a reseller asks about their balance, wallet, or past orders.",
     input_schema: { type: "object", properties: {} }
@@ -998,6 +1010,41 @@ async function runTool(name, input, senderId) {
       }));
       return { tier: member.tier, walletBalance: formatPHP(balance), summary: reseller.summarize(ledger), recent,
         instructionsForYou: "Tell them their balance and, if they asked, their recent purchases. To top up the wallet they pay by GCash/bank and send the screenshot; an admin adds it." };
+    }
+
+    case "topup_wallet": {
+      const member = await getResellerSafe(senderId);
+      if (!member) return { error: "Only approved resellers have a wallet. Offer the reseller program instead." };
+      const credit = Math.round(Number(input.amountPHP) * 100) / 100;
+      if (!(credit >= TOPUP_MIN_PHP) || credit > TOPUP_MAX_PHP) return { error: `Top-up amount must be between ${formatPHP(TOPUP_MIN_PHP)} and ${formatPHP(TOPUP_MAX_PHP)}.` };
+      if (!pm.configured() || !PUBLIC_URL || !pmAllowedFor(senderId)) {
+        return { error: "Online top-up is not available right now. Tell them to pay by GCash or bank transfer and send the screenshot; an admin will add it to the wallet." };
+      }
+      const fee = Math.ceil(credit * TOPUP_FEE_PERCENT) / 100;
+      const total = Math.round((credit + fee) * 100) / 100;
+      const bonus = topupBonusFor(credit);
+      const ref = "3UK-TOPUP-" + Date.now().toString(36).toUpperCase();
+      try {
+        const co = await pm.createCheckout({
+          amountPHP: total, name: `Reseller wallet top-up ${formatPHP(credit)}`,
+          description: `3UK Philippines reseller wallet top-up: ${formatPHP(credit)} + ${formatPHP(fee)} payment processing fee`,
+          reference: ref, successUrl: `${PUBLIC_URL}/paid`, cancelUrl: `${PUBLIC_URL}/chat`, metadata: { ref, psid: senderId, kind: "topup" }, types: pm.methods()
+        });
+        await pmSaveOrder(co.id, { kind: "topup", ref, psid: senderId, creditPHP: credit, feePHP: fee, bonusPHP: bonus, pricePHP: total,
+          planName: "Wallet top-up", planLabel: `Wallet top-up ${formatPHP(credit)} (+${formatPHP(fee)} fee)`, amount: co.amount, createdAt: Date.now(), status: "pending" });
+        await sendText(senderId,
+          `💳 Wallet top-up link: ${formatPHP(credit)} + ${formatPHP(fee)} payment processing fee = ${formatPHP(total)}\n${co.url}\n\n` +
+          `✅ No screenshot needed: once paid, ${formatPHP(credit)}${bonus ? ` + ${formatPHP(bonus)} bonus` : ""} is added to your wallet automatically.` +
+          (pm.isTest() ? "\n\n[TEST MODE: no real payment]" : ""));
+        const who = await getCustomerName(senderId);
+        notifyAdmin({ title: `Top-up link sent: ${formatPHP(credit)}`, message: `${who}\nPays ${formatPHP(total)} (incl. ${formatPHP(fee)} fee). Ref ${ref}. Wallet is credited automatically when paid.`, tags: "credit_card" }).catch(() => {});
+        return { ok: true, linkSentToCustomer: true, creditPHP: credit, feePHP: fee, totalPHP: total, bonusPHP: bonus || 0,
+          instructionsForYou: `A secure top-up link for ${formatPHP(total)} (${formatPHP(credit)} + ${formatPHP(fee)} processing fee) was just sent (don't repeat it). ` +
+            `Tell them briefly to pay it; the wallet is credited automatically${bonus ? `, including a ${formatPHP(bonus)} bonus` : ""}. No screenshot needed.` };
+      } catch (err) {
+        console.error("[topup] checkout failed:", err.message);
+        return { error: "Online top-up link failed. Tell them to pay by GCash or bank transfer and send the screenshot; an admin will add it." };
+      }
     }
 
     case "apply_reseller": {
@@ -1713,6 +1760,16 @@ function pmAllowedFor(senderId) {
 // Anything unusual -> the customer is told payment is confirmed and the admin gets an urgent alert.
 const AUTO_DELIVER = String(process.env.AUTO_DELIVER || "on").toLowerCase() !== "off";
 const AUTO_DELIVER_MAX_PHP = Number(process.env.AUTO_DELIVER_MAX_PHP) || 15000;
+// Reseller wallet top-ups by PayMongo. The processing fee is added on top (paid by the reseller).
+const TOPUP_FEE_PERCENT = Number(process.env.TOPUP_FEE_PERCENT ?? 3);
+const TOPUP_MIN_PHP = Number(process.env.TOPUP_MIN_PHP) || 500;
+const TOPUP_MAX_PHP = Number(process.env.TOPUP_MAX_PHP) || 100000;
+// Holiday bonus: TOPUP_BONUS = "minPHP:bonusPHP:YYYY-MM-DD(last day, Manila)" (default ₱250 on ₱5,000+ until Dec 20, 2026).
+function topupBonusFor(creditPHP) {
+  const [min, bonus, until] = String(process.env.TOPUP_BONUS || "5000:250:2026-12-20").split(":");
+  const today = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
+  return creditPHP >= Number(min) && today <= until ? Number(bonus) || 0 : 0;
+}
 const AUTO_DELIVER_DAILY_MAX = Number(process.env.AUTO_DELIVER_DAILY_MAX) || 30;
 const pmMem = { orders: new Map(), pending: new Set(), done: new Set(), daily: new Map() };
 let pmWebhookSecret = null;
@@ -1773,7 +1830,9 @@ async function handlePaidCheckout(id, source) {
       await notifyAdmin({ title: "PAID order needs you", priority: "urgent", tags: "rotating_light",
         message: `${customer} PAID ${formatPHP(order.pricePHP)} for ${order.planName} (ref ${order.ref}), but it was NOT auto-delivered:\n${reason}\n👉 Open the chat in the console and use 1-tap Deliver (or send it manually).` }).catch(() => {});
       try {
-        await adminSendText(psid, told
+        await adminSendText(psid, order.kind === "topup"
+          ? `✅ Payment received (${formatPHP(order.pricePHP)}). Thank you! Our team will add it to your wallet shortly. 🙏`
+          : told
           ? "Your eSIM needs a quick check by our team; it will be sent here shortly. Thank you for your patience! 🙏"
           : `✅ Payment received (${formatPHP(order.pricePHP)}). Thank you! Our team is preparing your eSIM and will send it here shortly. 🙏`);
         pausedUntil.delete(psid);
@@ -1786,6 +1845,24 @@ async function handlePaidCheckout(id, source) {
       await pmUpdateOrder(id, { status: "test-done" });
       try { await adminSendText(psid, `✅ [TEST MODE] Payment of ${formatPHP(order.pricePHP)} confirmed automatically. In live mode your eSIM (${order.planName}) would be bought and sent here right now. No real eSIM was bought.`); pausedUntil.delete(psid); }
       catch (e) { console.error("[paymongo] test message failed:", e.message); }
+      return;
+    }
+    if (order.kind === "topup") {
+      try {
+        const r = await reseller.walletTransaction(psid, { type: "topup", amountPHP: order.creditPHP, note: `PayMongo top-up ${order.ref}`, by: "paymongo" });
+        let balance = r.balance;
+        if (order.bonusPHP > 0) balance = (await reseller.walletTransaction(psid, { type: "adjust", amountPHP: order.bonusPHP, note: `Top-up bonus (${order.ref})`, by: "promo" })).balance;
+        await pmUpdateOrder(id, { status: "credited", creditedAt: Date.now(), balanceAfter: balance });
+        await adminSendText(psid, `✅ Payment received! Your reseller wallet was topped up: +${formatPHP(order.creditPHP)}${order.bonusPHP > 0 ? ` + ${formatPHP(order.bonusPHP)} bonus` : ""}. Your balance is now ${formatPHP(balance)}. Thank you! 🙏`);
+        appendNote(psid, `[Wallet top-up paid by PayMongo: +${formatPHP(order.creditPHP)}${order.bonusPHP > 0 ? " + " + formatPHP(order.bonusPHP) + " bonus" : ""}. Balance now ${formatPHP(balance)}.]`);
+        pausedUntil.delete(psid);
+        const member = await getResellerSafe(psid);
+        notifyAdmin({ title: `💰 Wallet top-up PAID: ${formatPHP(order.creditPHP)}`, tags: "moneybag",
+          message: `${customer}\nCredited ${formatPHP(order.creditPHP)}${order.bonusPHP > 0 ? " + " + formatPHP(order.bonusPHP) + " bonus" : ""}; balance ${formatPHP(balance)}.\nRef ${order.ref}` +
+            (member && member.tier !== "gold" && order.creditPHP >= 5000 ? "\n👉 Consider upgrading them to Gold in the console." : "") }).catch(() => {});
+      } catch (e) {
+        return manual(`Wallet top-up of ${formatPHP(order.creditPHP)} was PAID but could not be credited automatically: ${e.message}. Add it in the console (Wallet > Top-up).`);
+      }
       return;
     }
     capi.sendPurchase({ psid, valuePHP: order.pricePHP, email: order.email, ref: order.ref, planName: order.planName }).catch(() => {});
