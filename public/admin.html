@@ -582,14 +582,36 @@
       if (!d.partners || !d.partners.length) { $("ptList").textContent = "No partners set up."; return; }
       $("ptList").innerHTML = d.partners.map(function (p) {
         var head = "<p><b>" + esc(p.partner.name) + "</b> (" + esc(p.partner.code) + ", " + p.partner.pct + "%) · " + (d.month === "all" ? "All time" : esc(d.month)) +
-          "<br>Orders: <b>" + p.orders + "</b> · Sales: <b>" + peso(p.salesPHP) + "</b> · Commission due: <b>" + peso(p.commissionPHP) + "</b></p>";
+          "<br>Orders: <b>" + p.orders + "</b> · Sales: <b>" + peso(p.salesPHP) + "</b> · Commission: <b>" + peso(p.commissionPHP) + "</b>" +
+          " (credited to wallet " + peso(p.creditedToWalletPHP) + " · still to pay " + peso(p.stillToPayPHP) + ")</p>" +
+          "<div class='row' style='margin-bottom:8px'>Commission goes to wallet: <select data-ptw='" + esc(p.partner.code) + "' style='max-width:260px'><option value=''>None (pay monthly)</option>" +
+          (p.wallet ? "<option value='" + esc(p.wallet) + "' selected>" + esc(p.walletName || p.wallet) + "</option>" : "") +
+          "</select> <button class='ghost' data-ptsave='" + esc(p.partner.code) + "'>Save</button></div>";
         if (!p.rows.length) return head + "<p>No paid orders yet.</p>";
-        return head + "<table style='width:100%;border-collapse:collapse;font-size:13px'><tr><th align=left>Date</th><th align=left>Customer</th><th align=left>Plan</th><th align=right>Paid</th><th align=right>Commission</th></tr>" +
+        return head + "<table style='width:100%;border-collapse:collapse;font-size:13px'><tr><th align=left>Date</th><th align=left>Customer</th><th align=left>Plan</th><th align=right>Paid</th><th align=right>Commission</th><th align=left>Paid</th></tr>" +
           p.rows.slice().reverse().map(function (r) {
             return "<tr><td>" + esc(fmt(r.at)) + "</td><td>" + esc(r.customerName || r.customer) + "</td><td>" + esc((r.quantity > 1 ? r.quantity + " × " : "") + r.plan) +
-              "</td><td align=right>" + peso(r.amountPHP) + "</td><td align=right>" + peso(r.commissionPHP) + "</td></tr>";
+              "</td><td align=right>" + peso(r.amountPHP) + "</td><td align=right>" + peso(r.commissionPHP) + "</td><td>" + (r.creditedToWallet ? "to wallet" : "monthly") + "</td></tr>";
           }).join("") + "</table>";
       }).join("<hr>");
+      // Fill the wallet pickers with approved resellers.
+      api("/admin/api/resellers").then(function (r) {
+        Array.prototype.forEach.call(document.querySelectorAll("[data-ptw]"), function (sel) {
+          (r.members || []).forEach(function (m) {
+            if (m.psid === sel.value) return;
+            var o = document.createElement("option"); o.value = m.psid;
+            o.textContent = (m.name || m.psid) + " (" + (m.tier || "reseller") + ", " + peso(m.balance) + ")"; sel.appendChild(o);
+          });
+        });
+      }).catch(function () {});
+      Array.prototype.forEach.call(document.querySelectorAll("[data-ptsave]"), function (b) {
+        b.onclick = function () {
+          var code = b.getAttribute("data-ptsave"), sel = document.querySelector("[data-ptw='" + code + "']");
+          api("/admin/api/partners/wallet", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: code, psid: sel.value }) })
+            .then(function () { $("ptStatus").className = "status ok"; $("ptStatus").textContent = "✓ Saved. " + (sel.value ? "New commissions go to that wallet automatically." : "Commissions will be paid monthly."); loadPartners(); })
+            .catch(function (e) { $("ptStatus").className = "status err"; $("ptStatus").textContent = e.message; });
+        };
+      });
     }).catch(function (e) { $("ptList").textContent = "Couldn't load: " + e.message; });
   }
   $("ptLoad").onclick = loadPartners;
@@ -598,11 +620,11 @@
   $("ptCsv").onclick = function () {
     if (!ptData) return;
     var q = function (v) { v = v == null ? "" : String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
-    var lines = [["Partner", "Date (Manila)", "Order ref", "Customer", "Plan", "Qty", "Amount paid (PHP)", "Commission %", "Commission (PHP)"].join(",")];
+    var lines = [["Partner", "Date (Manila)", "Order ref", "Customer", "Plan", "Qty", "Amount paid (PHP)", "Commission %", "Commission (PHP)", "Paid via"].join(",")];
     ptData.partners.forEach(function (p) {
       p.rows.forEach(function (r) {
         var dt = new Date(new Date(r.at).getTime() + 8 * 3600000).toISOString().replace("T", " ").slice(0, 16);
-        lines.push([p.partner.name, dt, r.orderRef, r.customerName || r.customer, r.plan, r.quantity || 1, r.amountPHP.toFixed(2), r.pct, r.commissionPHP.toFixed(2)].map(q).join(","));
+        lines.push([p.partner.name, dt, r.orderRef, r.customerName || r.customer, r.plan, r.quantity || 1, r.amountPHP.toFixed(2), r.pct, r.commissionPHP.toFixed(2), r.creditedToWallet ? "Wallet credit" : "Monthly payout"].map(q).join(","));
       });
       lines.push([p.partner.name + " TOTAL", "", "", "", "", p.orders, p.salesPHP.toFixed(2), p.partner.pct, p.commissionPHP.toFixed(2)].map(q).join(","));
     });

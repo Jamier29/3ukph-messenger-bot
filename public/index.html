@@ -442,6 +442,18 @@ footer a{color:#fff}
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="3UK eSIM">
 <meta name="mobile-web-app-capable" content="yes">
+<script>
+/* partner referral (?ref=CODE): decided before anything renders */
+(function(){
+  var PARTNERS={TRIPHAPPY:{code:'TRIPHAPPY',name:'TRIPHAPPY.PH',logo:'/partners/triphappy-logo.png'}};
+  var KEY='3uk_partner',DAYS=60,p=null;
+  try{var q=new URLSearchParams(location.search).get('ref');var c=q&&q.toUpperCase().replace(/[^A-Z0-9]/g,'');
+    if(c&&PARTNERS[c]){p=PARTNERS[c];localStorage.setItem(KEY,JSON.stringify({code:c,at:Date.now()}));}
+    else{var s=JSON.parse(localStorage.getItem(KEY)||'null');if(s&&PARTNERS[s.code]&&Date.now()-s.at<DAYS*864e5)p=PARTNERS[s.code];}
+  }catch(e){}
+  if(p)window.__PARTNER=p;
+})();
+</script>
 </head>
 <body id="top" data-mode="land">
 <div class="promo" role="region" aria-label="Welcome offer"><div class="wrap">
@@ -1015,7 +1027,9 @@ function more(){
       '<div class="uk-plan-spec"><span class="uk-plan-data">'+esc(label)+'</span><span>·</span><span>'+x.validityDays+' day'+(x.validityDays>1?'s':'')+'</span></div>'+
       '<div class="uk-plan-meta">'+esc(x.name)+'</div>'+
       '<div class="uk-plan-price">'+esc(x.price)+'</div><ul class="uk-plan-feats">'+feats+'</ul>'+
-      '<a class="uk-btn uk-btn-primary uk-btn-block order" href="'+M+'" target="_blank" rel="noopener" data-txt="'+esc(txt)+'">Order now</a></article>';
+      (window.__PARTNER&&x.planId?'<button type="button" class="uk-btn uk-btn-primary uk-btn-block buynow" data-plan="'+esc(x.planId)+'" data-name="'+esc(x.name)+'" data-price="'+esc(x.price)+'">Buy now · pay online</button>'+
+        '<a class="uk-btn uk-btn-block order" style="margin-top:8px" href="'+M+'" target="_blank" rel="noopener" data-txt="'+esc(txt)+'">Ask us in chat</a>':
+        '<a class="uk-btn uk-btn-primary uk-btn-block order" href="'+M+'" target="_blank" rel="noopener" data-txt="'+esc(txt)+'">Order now</a>')+'</article>';
   });
   plansEl.insertAdjacentHTML('beforeend',html);shown+=9;moreBtn.hidden=shown>=found.length;
 }
@@ -1835,17 +1849,61 @@ nav a.uk-btn-ghost{white-space:nowrap}
 </style>
 <script>
 (function(){
-  var PARTNERS={TRIPHAPPY:{code:'TRIPHAPPY',name:'TRIPHAPPY.PH',logo:'/partners/triphappy-logo.png'}};
-  var KEY='3uk_partner',DAYS=60,p=null;
-  try{var q=new URLSearchParams(location.search).get('ref');var c=q&&q.toUpperCase().replace(/[^A-Z0-9]/g,'');
-    if(c&&PARTNERS[c]){p=PARTNERS[c];localStorage.setItem(KEY,JSON.stringify({code:c,at:Date.now()}));}
-    else{var s=JSON.parse(localStorage.getItem(KEY)||'null');if(s&&PARTNERS[s.code]&&Date.now()-s.at<DAYS*864e5)p=PARTNERS[s.code];}
-  }catch(e){}
+  var p=window.__PARTNER;
   if(!p)return;
-  window.__PARTNER=p;
   var bar=document.createElement('div');bar.className='pbar';bar.setAttribute('role','note');
   bar.innerHTML='<span>3UK Philippines</span><span class="x">\u00d7</span><img alt="'+p.name+'" src="'+p.logo+'"><small>Official eSIM partner of '+p.name+'. Order below and our assistant will take care of you.</small>';
   document.body.insertBefore(bar,document.body.firstChild);
+})();
+</script>
+<!-- Buy now (partner links): pay online, eSIM QR by email, sale credited to the partner -->
+<style>
+.bn-back{position:fixed;inset:0;background:rgba(14,37,120,.45);display:none;align-items:center;justify-content:center;z-index:9999;padding:16px}
+.bn-back.show{display:flex}
+.bn{background:#fff;border-radius:18px;max-width:400px;width:100%;padding:22px 20px;box-shadow:0 12px 40px rgba(0,0,0,.25);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#15204a}
+.bn h3{margin:0 0 4px;font-size:19px;color:#0e2578}.bn .pl{margin:0 0 14px;color:#475569;font-size:14px}
+.bn label{display:block;font-size:13px;font-weight:600;margin:10px 0 4px}
+.bn input{width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid #cbd5e1;border-radius:10px;font-size:16px}
+.bn .note{font-size:12.5px;color:#64748b;margin:10px 0 0}
+.bn .err{color:#c8102e;font-size:13px;min-height:18px;margin-top:8px}
+.bn .acts{display:flex;gap:8px;margin-top:12px}.bn .acts button{flex:1;padding:12px;border-radius:999px;border:0;font-weight:700;font-size:15px;cursor:pointer}
+.bn .go{background:#c8102e;color:#fff}.bn .go[disabled]{opacity:.6}.bn .cx{background:#eef2ff;color:#0e2578}
+</style>
+<div class="bn-back" id="bnBack" role="dialog" aria-modal="true" aria-labelledby="bnTitle">
+  <form class="bn" id="bnForm" novalidate>
+    <h3 id="bnTitle">Buy your eSIM</h3>
+    <p class="pl" id="bnPlan"></p>
+    <label for="bnName">Your name</label><input id="bnName" autocomplete="name" required maxlength="60">
+    <label for="bnEmail">Email (your QR code is sent here)</label><input id="bnEmail" type="email" autocomplete="email" required maxlength="120">
+    <p class="note">Pay securely with GCash, Maya, any bank app (QR Ph) or card. Your eSIM QR code, install steps and receipt arrive by email within minutes. Please check that your phone supports eSIM. (Have a discount code? Use "Ask us in chat" to order with it.)</p>
+    <div class="err" id="bnErr" aria-live="polite"></div>
+    <div class="acts"><button type="button" class="cx" id="bnCancel">Cancel</button><button type="submit" class="go" id="bnGo">Continue to payment</button></div>
+  </form>
+</div>
+<script>
+(function(){
+  var back=document.getElementById('bnBack'),cur=null;
+  function close(){back.classList.remove('show');}
+  document.getElementById('bnCancel').onclick=close;
+  back.addEventListener('click',function(e){if(e.target===back)close();});
+  document.addEventListener('click',function(e){
+    var b=e.target.closest&&e.target.closest('button.buynow');if(!b)return;
+    cur={planId:b.getAttribute('data-plan'),name:b.getAttribute('data-name'),price:b.getAttribute('data-price')};
+    document.getElementById('bnPlan').textContent=cur.name+' · '+cur.price;
+    document.getElementById('bnErr').textContent='';document.getElementById('bnGo').disabled=false;document.getElementById('bnGo').textContent='Pay '+cur.price;
+    back.classList.add('show');setTimeout(function(){document.getElementById('bnName').focus();},50);
+  });
+  document.getElementById('bnForm').addEventListener('submit',function(e){
+    e.preventDefault();if(!cur)return;
+    var nm=document.getElementById('bnName').value.trim(),em=document.getElementById('bnEmail').value.trim(),er=document.getElementById('bnErr'),go=document.getElementById('bnGo');
+    if(!nm){er.textContent='Please enter your name.';return;}
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)){er.textContent='Please enter a valid email address.';return;}
+    go.disabled=true;go.textContent='Opening payment…';er.textContent='';
+    fetch('/api/web-checkout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({planId:cur.planId,name:nm,email:em,ref:(window.__PARTNER&&window.__PARTNER.code)||''})})
+      .then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||'Something went wrong.');return d;});})
+      .then(function(d){location.href=d.url;})
+      .catch(function(err){er.textContent=err.message;go.disabled=false;go.textContent='Pay '+cur.price;});
+  });
 })();
 </script>
 </body>

@@ -66,8 +66,26 @@ async function noteText(senderId, text) {
   return code;
 }
 
+// The reseller wallet (chat id) that receives this partner's commission automatically, or null (paid out monthly).
+const memWallet = new Map();
+async function walletOf(code) {
+  const c = norm(code);
+  if (redis) { try { return (await redis(["GET", `partner:wallet:${c}`])) || null; } catch (_) { return null; } }
+  return memWallet.get(c) || null;
+}
+async function setWallet(code, psid) {
+  const c = norm(code);
+  if (!PARTNERS[c]) throw new Error("Unknown partner code.");
+  const v = String(psid || "").trim();
+  if (v && !/^(wa)?\d+$/.test(v)) throw new Error("Bad chat id.");
+  if (redis) await redis(v ? ["SET", `partner:wallet:${c}`, v] : ["DEL", `partner:wallet:${c}`]);
+  else if (v) memWallet.set(c, v); else memWallet.delete(c);
+  return v || null;
+}
+
 // Record a PAID order for the customer's partner (once per orderRef). Returns the record or null.
-async function recordPaid({ senderId, orderRef, amountPHP, plan, quantity }) {
+// creditWallet(walletPsid, rec) is called when the partner has a commission wallet; it should return true when credited.
+async function recordPaid({ senderId, orderRef, amountPHP, plan, quantity, creditWallet }) {
   try {
     const link = await linkOf(senderId);
     if (!link || !PARTNERS[link.code] || !(amountPHP > 0) || !orderRef) return null;
@@ -86,6 +104,11 @@ async function recordPaid({ senderId, orderRef, amountPHP, plan, quantity }) {
       amountPHP: Math.round(amountPHP * 100) / 100, pct: p.pct,
       commissionPHP: Math.round(amountPHP * p.pct) / 100, via: link.source || ""
     };
+    const wallet = await walletOf(p.code);
+    if (wallet && creditWallet && rec.commissionPHP > 0) {
+      try { rec.creditedToWallet = !!(await creditWallet(wallet, rec)); if (rec.creditedToWallet) rec.wallet = wallet; }
+      catch (e) { console.error("[partners] wallet credit failed:", e.message); rec.creditedToWallet = false; }
+    }
     if (redis) await redis(["RPUSH", `partner:orders:${p.code}`, JSON.stringify(rec)]);
     else { const a = memOrders.get(p.code) || []; a.push(rec); memOrders.set(p.code, a); }
     console.log(`[partners] ${p.code} credited ₱${rec.commissionPHP} for ${rec.orderRef} (₱${rec.amountPHP})`);
@@ -109,7 +132,9 @@ async function statement(code, month) {
   if (month) rows = rows.filter((r) => manilaMonth(r.at) === month);
   const sales = rows.reduce((s, r) => s + r.amountPHP, 0);
   const commission = rows.reduce((s, r) => s + r.commissionPHP, 0);
-  return { partner: p, month: month || "all", orders: rows.length, salesPHP: Math.round(sales * 100) / 100, commissionPHP: Math.round(commission * 100) / 100, rows };
+  const credited = rows.filter((r) => r.creditedToWallet).reduce((s, r) => s + r.commissionPHP, 0);
+  return { partner: p, month: month || "all", orders: rows.length, salesPHP: Math.round(sales * 100) / 100, commissionPHP: Math.round(commission * 100) / 100,
+    creditedToWalletPHP: Math.round(credited * 100) / 100, stillToPayPHP: Math.round((commission - credited) * 100) / 100, wallet: await walletOf(p.code), rows };
 }
 
-module.exports = { init, isCode, info, list, findCodeInText, attach, linkOf, noteText, recordPaid, statement };
+module.exports = { init, isCode, info, list, findCodeInText, attach, linkOf, noteText, recordPaid, statement, walletOf, setWallet };

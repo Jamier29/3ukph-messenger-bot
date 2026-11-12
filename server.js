@@ -101,6 +101,8 @@ const WA_TOKEN = (process.env.WA_TOKEN || "").trim();
 const WA_PHONE_NUMBER_ID = (process.env.WA_PHONE_NUMBER_ID || "").trim();
 const WA_VERIFY_TOKEN = (process.env.WA_VERIFY_TOKEN || process.env.VERIFY_TOKEN || "").trim();
 const isWa = (id) => /^wa\d+$/.test(String(id || ""));
+// Website buyers (direct checkout, no chat): delivered by email only.
+const isWeb = (id) => /^web_[a-z0-9]{6,40}$/.test(String(id || ""));
 
 if (!VERIFY_TOKEN || !PAGE_ACCESS_TOKEN || !ANTHROPIC_API_KEY) {
   console.warn(
@@ -1520,6 +1522,7 @@ async function loadSentImage(key) {
 }
 // Sends an image as the admin (WhatsApp or Messenger) and records it for the console.
 async function adminSendImage(psid, buf, mime, caption, capExtra) {
+  if (isWeb(psid)) return; // website buyer: QR goes by email
   const ext = mime === "image/png" ? "png" : mime === "image/webp" ? "webp" : mime === "image/gif" ? "gif" : "jpg";
   let media, messageId;
   if (isWa(psid)) {
@@ -1556,6 +1559,7 @@ async function adminSendImage(psid, buf, mime, caption, capExtra) {
 }
 // Sends a text as the admin (no console record when quiet=true; caller records it).
 async function adminSendText(psid, text, quiet) {
+  if (isWeb(psid)) { if (!quiet) recordChat(psid, true, text, "admin"); return; } // website buyer: no chat
   if (isWa(psid)) {
     const data = await waSend(psid, { type: "text", text: { body: text.slice(0, 4000), preview_url: false } });
     if (!data) throw new Error("WhatsApp didn't accept the message (24-hour window may have closed).");
@@ -1691,7 +1695,7 @@ async function deliverEsim(psid, planId, opts = {}) {
       try {
         const nm = await getCustomerName(psid).catch(() => "");
         await mailer.sendEsimEmail({
-          to: emailTo, name: /^(Messenger user|wa)\b/.test(nm) ? "" : String(nm).replace(/\s*\(\+?\d+\)$/, "").split(" ")[0],
+          to: emailTo, name: /^(Messenger user|wa|Website buyer)\b/.test(nm) ? "" : String(nm).replace(/^Website: /, "").replace(/\s*\([^)]*\)$/, "").split(" ")[0],
           plan: plan.name, iccid: sim.iccid || null, smdp: sim.smdp || null, activationCode: sim.matching || null, qrPng: png, qrUrl: await hostEmailQr(png).catch(() => null),
           amount: opts.paidPHP ? formatPHP(opts.paidPHP) : (order && order.price) || "",
           method: opts.method || (order && order.method) || "",
@@ -1722,9 +1726,19 @@ app.get("/admin/api/partners", requireAdmin, async (req, res) => {
   for (const p of partners.list()) {
     const st = await partners.statement(p.code, month);
     for (const r of st.rows) r.customerName = await getCustomerName(r.customer).catch(() => r.customer);
+    if (st.wallet) st.walletName = await getCustomerName(st.wallet).catch(() => st.wallet);
     out.push(st);
   }
   res.json({ month: month || "all", partners: out });
+});
+
+// Which reseller wallet receives a partner's commission automatically ("" = none, pay monthly instead).
+app.post("/admin/api/partners/wallet", requireAdmin, express.json(), async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (b.psid && !(await getResellerSafe(String(b.psid)))) return res.status(400).json({ error: "That chat is not an approved reseller yet. Approve them as a reseller first." });
+    res.json({ ok: true, wallet: await partners.setWallet(b.code, b.psid) });
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 app.post("/admin/api/deliver", requireAdmin, async (req, res) => {
@@ -1869,7 +1883,7 @@ async function handlePaidCheckout(id, source) {
       }
       return;
     }
-    capi.sendPurchase({ psid, valuePHP: order.pricePHP, email: order.email, ref: order.ref, planName: order.planName }).catch(() => {});
+    if (!isWeb(psid)) capi.sendPurchase({ psid, valuePHP: order.pricePHP, email: order.email, ref: order.ref, planName: order.planName }).catch(() => {});
     creditPartner(psid, order.ref, order.pricePHP, order.planName, order.quantity).catch(() => {});
     if (!AUTO_DELIVER) return manual("Automatic delivery is switched off (AUTO_DELIVER=off).");
     if (order.pricePHP > AUTO_DELIVER_MAX_PHP) return manual(`Order is above the auto-delivery limit of ${formatPHP(AUTO_DELIVER_MAX_PHP)}.`);
@@ -1940,14 +1954,61 @@ if (pm.configured()) {
 }
 
 // Where PayMongo sends the customer after paying.
+// ---- Website direct checkout (used on partner links like 3ukph.com/?ref=TRIPHAPPY) ----
+// The buyer picks a plan, enters name + email, pays by PayMongo; the eSIM is emailed. The sale is credited
+// to the partner from the link (no chat, nothing the buyer can delete).
+const webCheckoutHits = new Map();
+app.post("/api/web-checkout", express.json({ limit: "10kb" }), async (req, res) => {
+  try {
+    const ip = String(req.headers["x-forwarded-for"] || req.ip || "").split(",")[0].trim();
+    const now = Date.now(), hits = (webCheckoutHits.get(ip) || []).filter((t) => now - t < 10 * 60000);
+    if (hits.length >= 8) return res.status(429).json({ error: "Too many attempts. Please wait a few minutes or message us on WhatsApp." });
+    hits.push(now); webCheckoutHits.set(ip, hits);
+    const b = req.body || {};
+    const email = String(b.email || "").trim().slice(0, 120);
+    const name = String(b.name || "").trim().replace(/[<>]/g, "").slice(0, 60);
+    const partnerCode = partners.isCode(b.ref) ? String(b.ref).toUpperCase() : null;
+    if (!pm.configured() || pm.isTest() || !PUBLIC_URL || !mailer.configured()) return res.status(503).json({ error: "Online checkout is not available right now. Please order through WhatsApp or Messenger." });
+    if (!mailer.validEmail(email)) return res.status(400).json({ error: "Please enter a valid email address. Your eSIM QR code will be sent there." });
+    if (!name) return res.status(400).json({ error: "Please enter your name." });
+    const plan = getPlan(String(b.planId || ""));
+    if (!plan || !(plan.pricePHP > 0)) return res.status(404).json({ error: "This plan is no longer available. Please choose another one." });
+    if (esims.configured()) {
+      const raw0 = getRawPlan(plan.planId);
+      const pk0 = await esims.findPackage(plan.name, { retailUSD: raw0 && raw0.retailPrice, costUSD: reseller.costOf(raw0), packageId: raw0 && raw0.packageId }).catch(() => undefined);
+      if (pk0 === null) return res.status(409).json({ error: "This exact plan is temporarily unavailable. Please choose another plan, or message us on WhatsApp for help." });
+    }
+    const buyer = "web_" + crypto.randomBytes(8).toString("hex");
+    const ref = "3UK-W" + Date.now().toString(36).toUpperCase();
+    if (UPSTASH_URL && UPSTASH_TOKEN) await redis(["SET", `web:buyer:${buyer}`, JSON.stringify({ name, email, partner: partnerCode, at: now }), "EX", String(400 * 86400)]);
+    if (partnerCode) await partners.attach(buyer, partnerCode, "website checkout");
+    const planLabel = `${plan.name} (${plan.destination}, ${plan.data}, ${plan.validityDays} days${plan.callsAndTexts ? ", with calls & texts" : ""})`;
+    const co = await pm.createCheckout({
+      amountPHP: plan.pricePHP, name: `eSIM ${plan.name}`, description: `3UK Philippines eSIM: ${planLabel}`,
+      reference: ref, successUrl: `${PUBLIC_URL}/paid?web=1`, cancelUrl: `${PUBLIC_URL}/${partnerCode ? "?ref=" + partnerCode : ""}`,
+      metadata: { ref, psid: buyer, kind: "web" }, types: pm.methods()
+    });
+    await pmSaveOrder(co.id, { kind: "web", ref, psid: buyer, planId: plan.planId, planName: plan.name, planLabel, pricePHP: plan.pricePHP, amount: co.amount,
+      email, method: "Website checkout", reseller: false, discount: null, createdAt: now, status: "pending", quantity: 1, partner: partnerCode });
+    notifyAdmin({ title: `Website checkout started: ${plan.price}`, tags: "globe_with_meridians",
+      message: `${name} (${email})\n${planLabel}\nRef ${ref}${partnerCode ? "\nPartner: " + partnerCode : ""}\nDelivered by email automatically when paid.` }).catch(() => {});
+    res.json({ ok: true, url: co.url });
+  } catch (e) {
+    console.error("[web-checkout]", e.message);
+    res.status(500).json({ error: "Couldn't start the payment. Please try again or message us on WhatsApp." });
+  }
+});
+
 app.get("/paid", (req, res) => {
+  const web = req.query.web === "1";
   res.type("html").send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Payment received | 3UK Philippines</title>
 <style>body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#f4f7fc;color:#15204a;display:flex;min-height:100vh;align-items:center;justify-content:center}
 .c{background:#fff;max-width:420px;margin:16px;padding:32px 24px;border-radius:20px;box-shadow:0 8px 30px rgba(14,37,120,.12);text-align:center}
 h1{color:#0e2578;font-size:26px;margin:12px 0}p{line-height:1.5;color:#3b4570}a.b{display:inline-block;margin:8px 4px;padding:12px 18px;border-radius:999px;background:#0e2578;color:#fff;text-decoration:none;font-weight:600}
 a.w{background:#25d366}</style></head><body><div class="c"><img src="/logo.png" alt="3UK Philippines" width="90" height="90">
-<h1>Payment received ✅</h1><p>Thank you! Your eSIM QR code will be sent to your chat (WhatsApp or Messenger) automatically within a few minutes.</p>
-<p>You can close this page and go back to the chat.</p><a class="b w" href="https://wa.me/639347069356">Back to WhatsApp</a><a class="b" href="https://3ukph.com">3ukph.com</a></div></body></html>`);
+<h1>Payment received ✅</h1>${web
+  ? "<p>Thank you! Your eSIM QR code, install steps and receipt will be sent to your <b>email</b> within a few minutes. Please check Spam/Promotions too.</p><p>Questions? Message us on WhatsApp anytime.</p>"
+  : "<p>Thank you! Your eSIM QR code will be sent to your chat (WhatsApp or Messenger) automatically within a few minutes.</p><p>You can close this page and go back to the chat.</p>"}<a class="b w" href="https://wa.me/639347069356">Back to WhatsApp</a><a class="b" href="https://3ukph.com">3ukph.com</a></div></body></html>`);
 });
 
 // ---- Automatic follow-up (WhatsApp only) -------------------------------------
@@ -2955,9 +3016,17 @@ async function guardAllows(senderId, text) {
 // Credits a paid order to the customer's referral partner (resellers' own purchases don't count).
 async function creditPartner(psid, orderRef, amountPHP, planName, quantity) {
   if (await getResellerSafe(psid)) return null;
-  const r = await partners.recordPaid({ senderId: psid, orderRef, amountPHP, plan: planName, quantity });
+  const r = await partners.recordPaid({ senderId: psid, orderRef, amountPHP, plan: planName, quantity,
+    // Partner has a reseller wallet: put the commission there right away and tell them.
+    creditWallet: async (wallet, rec) => {
+      const w = await reseller.walletTransaction(wallet, { type: "adjust", amountPHP: rec.commissionPHP, note: `Partner commission ${rec.pct}% on ${rec.orderRef}`, by: "partner" });
+      await sendText(wallet, `💰 Partner commission: +${formatPHP(rec.commissionPHP)} (${rec.pct}% of a ${formatPHP(rec.amountPHP)} sale through your link). Your wallet balance is now ${formatPHP(w.balance)}.`).catch(() => {});
+      appendNote(wallet, `[Partner commission credited to this reseller's wallet: +${formatPHP(rec.commissionPHP)}. Balance now ${formatPHP(w.balance)}.]`);
+      return true;
+    } });
   if (r) notifyAdmin({ title: `🤝 Partner sale: ${r.partner.name}`, tags: "handshake",
-    message: `${formatPHP(r.rec.amountPHP)} ${r.rec.plan}\nCommission ${r.partner.pct}%: ${formatPHP(r.rec.commissionPHP)} (ref ${r.rec.orderRef})` }).catch(() => {});
+    message: `${formatPHP(r.rec.amountPHP)} ${r.rec.plan}\nCommission ${r.partner.pct}%: ${formatPHP(r.rec.commissionPHP)} (ref ${r.rec.orderRef})` +
+      (r.rec.creditedToWallet ? "\n✅ Credited to their wallet automatically." : "\n(To be paid with the monthly statement.)") }).catch(() => {});
   return r;
 }
 
@@ -3197,6 +3266,15 @@ const nameCache = new Map();
 let profileApiWarned = false;
 async function getCustomerName(psid) {
   if (nameCache.has(psid)) return nameCache.get(psid);
+  if (isWeb(psid)) {
+    let name = "Website buyer";
+    try {
+      const v = UPSTASH_URL && UPSTASH_TOKEN ? await redis(["GET", `web:buyer:${psid}`]) : null;
+      if (v) { const b = JSON.parse(v); name = `Website: ${b.name || "buyer"} (${b.email})`; }
+    } catch (_) { /* ignore */ }
+    nameCache.set(psid, name);
+    return name;
+  }
   if (isWa(psid)) {
     let name = `WhatsApp +${psid.slice(2)}`;
     try {
@@ -3266,6 +3344,7 @@ async function callSendApi(payload) {
 
 // Messenger allows max 2000 characters per message, so long replies are split.
 async function sendText(recipientId, text) {
+  if (isWeb(recipientId)) return true; // website buyer: no chat
   const chunks = [];
   let rest = String(text || "");
   while (rest.length > 1900) {
@@ -3287,6 +3366,7 @@ async function sendText(recipientId, text) {
 }
 
 async function sendImage(recipientId, url) {
+  if (isWeb(recipientId)) return true;
   if (isWa(recipientId)) {
     const ok = await waSend(recipientId, { type: "image", image: { link: url } });
     if (ok) recordChat(recipientId, true, "(image)", "bot", { media: { src: "url", url } });
