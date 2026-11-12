@@ -140,7 +140,29 @@ async function resolvePageToken() {
     }
   } catch (err) { pageTokenStatus = "check error"; console.error("[token] check failed:", err.message); }
 }
-resolvePageToken();
+// Partner links (m.me/<page>?ref=CODE) only reach us if the Page's webhook includes "messaging_referrals".
+// Add it (keeping every field already subscribed) once the Page token is ready.
+let referralSubStatus = "checking";
+async function ensureReferralSubscription() {
+  if (!/^ok/.test(pageTokenStatus)) { referralSubStatus = "skipped (Page token not OK)"; return; }
+  try {
+    const url = `https://graph.facebook.com/v21.0/${FB_PAGE_ID}/subscribed_apps`;
+    const r = await fetch(`${url}?access_token=${encodeURIComponent(PAGE_ACCESS_TOKEN)}`);
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { referralSubStatus = "check failed: " + ((d.error && d.error.message) || r.status); return; }
+    const app = (d.data || [])[0];
+    const fields = new Set((app && app.subscribed_fields) || []);
+    if (!fields.size) { referralSubStatus = "no app subscribed (left unchanged)"; return; }
+    if (fields.has("messaging_referrals")) { referralSubStatus = "on"; return; }
+    fields.add("messaging_referrals");
+    const body = new URLSearchParams({ subscribed_fields: [...fields].join(","), access_token: PAGE_ACCESS_TOKEN });
+    const u = await fetch(url, { method: "POST", body });
+    const ud = await u.json().catch(() => ({}));
+    referralSubStatus = u.ok && ud.success ? "on (just enabled)" : "enable failed: " + ((ud.error && ud.error.message) || u.status);
+    console.log("[referrals] messaging_referrals:", referralSubStatus, "fields:", [...fields].join(","));
+  } catch (e) { referralSubStatus = "check error: " + e.message; }
+}
+resolvePageToken().then(ensureReferralSubscription);
 if (!ADMIN_NTFY_TOPIC) {
   console.warn("[startup] ADMIN_NTFY_TOPIC not set -- admin phone alerts are OFF (alerts will only appear in the Render logs).");
 }
@@ -2713,7 +2735,7 @@ app.post("/admin/api/resume-bot", requireAdmin, (req, res) => {
 
 // Health check for uptime monitoring
 app.get("/health", (req, res) => {
-  res.send(`3UKPH Messenger bot is running. Catalog: ${listAllDestinations().length} destinations loaded. Messenger token: ${pageTokenStatus}. Purchase tracking: ${capi.configured() ? "on" : "off"}${capi.status().last.at ? " (last: " + capi.status().last.message + ")" : ""}.`);
+  res.send(`3UKPH Messenger bot is running. Catalog: ${listAllDestinations().length} destinations loaded. Messenger token: ${pageTokenStatus}. Purchase tracking: ${capi.configured() ? "on" : "off"}${capi.status().last.at ? " (last: " + capi.status().last.message + ")" : ""}. Partner links (Messenger): ${referralSubStatus}.`);
 });
 
 // ---------------------------------------------------------------------
@@ -2761,7 +2783,14 @@ async function handleMessagingEvent(event) {
   }
   // Partner referral link: m.me/<page>?ref=CODE
   if (adRef && adRef.ref && event.sender && event.sender.id && partners.isCode(adRef.ref)) {
-    partners.attach(String(event.sender.id), adRef.ref, "messenger link").catch(() => {});
+    await partners.attach(String(event.sender.id), adRef.ref, "messenger link").catch(() => {});
+    // Opened the partner link in an existing chat (no message yet): greet them so the chat starts.
+    if (!message && !event.postback) {
+      const p = partners.info(adRef.ref);
+      const hi = `Hi! 👋 Welcome, ${p.name} traveler! I'm the 3UK Philippines eSIM assistant. Where are you travelling, and for how many days? I'll find the best plan for you. 😊`;
+      await sendText(String(event.sender.id), hi).catch(() => {});
+      return;
+    }
   }
 
   // Echo = a message the PAGE sent. If the bot didn't send it, an admin

@@ -36,6 +36,8 @@ function findCodeInText(text) {
   const t = String(text || "").toUpperCase();
   for (const code of Object.keys(PARTNERS)) {
     if (new RegExp(`(^|[^A-Z0-9])${code}([^A-Z0-9]|$)`).test(t)) return code;
+    // Also "Trip Happy", "triphappy.ph", "trip-happy" (long codes only, to avoid false matches).
+    if (code.length >= 6 && t.replace(/[^A-Z0-9]/g, "").includes(code)) return code;
   }
   return null;
 }
