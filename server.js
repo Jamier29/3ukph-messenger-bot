@@ -1766,21 +1766,32 @@ app.post("/admin/api/deliver", requireAdmin, async (req, res) => {
   const b = req.body || {};
   const psid = String(b.psid || "");
   if (!/^(wa)?\d+$/.test(psid)) return res.status(400).json({ error: "Pick a conversation first." });
+  // Several eSIMs of the same plan (e.g. a family paid by GCash for 3): buy and send each one, labelled "eSIM i of N".
+  const qty = Math.max(1, Math.min(10, parseInt(b.quantity, 10) || 1));
+  const results = [];
   try {
-    const result = await deliverEsim(psid, b.planId, { packageId: b.packageId });
-    // Manual (console) delivery = paid outside PayMongo: credit the partner with the quoted price.
-    (async () => {
+    for (let i = 1; i <= qty; i++) {
+      const r = await deliverEsim(psid, b.planId, { packageId: b.packageId, label: qty > 1 ? `eSIM ${i} of ${qty}` : "" });
+      results.push(r);
+    }
+  } catch (e) {
+    console.error(`[deliver] failed at ${results.length + 1}/${qty}:`, e.message);
+    if (!results.length) return res.status(e.status || 502).json({ error: e.message, ...(e.bought ? { bought: true } : {}) });
+    // Some were sent: report exactly how many, so the admin doesn't buy duplicates.
+    return res.status(e.status || 502).json({ error: `${results.length} of ${qty} eSIMs were delivered (ICCIDs ${results.map((r) => r.iccid).filter(Boolean).join(", ")}). eSIM ${results.length + 1} failed: ${e.message}` + (e.bought ? " The eSIM WAS bought but the QR didn't come back: check eSIMCard > My eSIMs, don't buy again." : " Set the quantity to the remaining number and try again."), delivered: results.length, ...(e.bought ? { bought: true } : {}) });
+  } finally {
+    // Manual (console) delivery = paid outside PayMongo: credit the partner with the quoted price (once for the whole order).
+    if (results.length) (async () => {
       const lo = await getLastOrder(psid);
       const plan = getPlan(b.planId);
       const quoted = lo && Number(String(lo.price || "").replace(/[^0-9.]/g, ""));
-      const amount = quoted > 0 && lo.planId === String(b.planId) ? quoted : plan && plan.pricePHP;
-      await creditPartner(psid, result.iccid || `manual-${psid}-${Date.now()}`, amount, plan && plan.name, 1);
+      const loQty = (lo && Number(lo.quantity)) || 1;
+      const unit = quoted > 0 && lo.planId === String(b.planId) ? quoted / loQty : plan && plan.pricePHP;
+      await creditPartner(psid, results[0].iccid || `manual-${psid}-${Date.now()}`, unit * results.length, plan && plan.name, results.length);
     })().catch(() => {});
-    res.json(result);
-  } catch (e) {
-    console.error("[deliver] failed:", e.message);
-    res.status(e.status || 502).json({ error: e.message, ...(e.bought ? { bought: true } : {}) });
   }
+  if (qty === 1) return res.json(results[0]);
+  res.json({ ...results[results.length - 1], quantity: qty, iccids: results.map((r) => r.iccid).filter(Boolean) });
 });
 
 // While testing (sk_test_ key) only these WhatsApp numbers get PayMongo links, so real customers
@@ -3213,7 +3224,7 @@ async function getClaudeReply(senderId, userText) {
           let result;
           try {
             result = await runTool(block.name, block.input || {}, senderId);
-            if (block.name === "create_order" && result && result.ok) { recordCustomerOrder(senderId, result.plan); saveLastOrder(senderId, { planId: String((block.input || {}).planId || ""), plan: result.plan, price: result.price, method: result.paymentMethod || (block.input || {}).paymentMethod || "", email: String((block.input || {}).email || ""), at: new Date().toISOString() }); }
+            if (block.name === "create_order" && result && result.ok) { recordCustomerOrder(senderId, result.plan); saveLastOrder(senderId, { planId: String((block.input || {}).planId || ""), plan: result.plan, price: result.price, quantity: Math.max(1, Math.min(10, parseInt((block.input || {}).quantity, 10) || 1)), method: result.paymentMethod || (block.input || {}).paymentMethod || "", email: String((block.input || {}).email || ""), at: new Date().toISOString() }); }
           } catch (err) {
             console.error("[tool] Failed:", block.name, err);
             result = { error: "Tool failed: " + err.message };

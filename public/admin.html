@@ -185,7 +185,7 @@
             <select id="dlvPick" style="max-width:360px"><option value="">— search to change the plan —</option></select>
           </div>
           <div id="dlvCheck" class="help" style="margin:8px 0"></div>
-          <div class="row"><button class="red" id="dlvBtn" disabled>Buy &amp; send eSIM</button></div>
+          <div class="row"><label style="display:flex;align-items:center;gap:6px">How many <input type="number" id="dlvQty" min="1" max="10" value="1" style="width:70px"></label><button class="red" id="dlvBtn" disabled>Buy &amp; send eSIM</button></div>
           <div class="status" id="dlvStatus"></div>
         </div>
       </section>
@@ -706,7 +706,9 @@
       if (!current || current.psid !== psid) return;
       dlv = d;
       var o = d.order;
-      $("dlvOrder").innerHTML = o ? ("Latest order: <b>" + esc(o.plan) + "</b> · " + esc(o.price || "") + " · " + esc(o.method || "") + (o.email ? " · " + esc(o.email) : "") + " · " + fmt(o.at) + (o.deliveredAt ? ' · <b style="color:var(--ok)">✓ delivered ' + fmt(o.deliveredAt) + (o.iccid ? " (ICCID " + esc(o.iccid) + ")" : "") + "</b>" : "")) : "No order from the bot in this chat yet. Search for the plan below.";
+      var oq = (o && Number(o.quantity)) || 1;
+      $("dlvQty").value = oq; dlvQtyLabel();
+      $("dlvOrder").innerHTML = o ? ("Latest order: <b>" + (oq > 1 ? oq + " × " : "") + esc(o.plan) + "</b> · " + esc(o.price || "") + " · " + esc(o.method || "") + (o.email ? " · " + esc(o.email) : "") + " · " + fmt(o.at) + (o.deliveredAt ? ' · <b style="color:var(--ok)">✓ delivered ' + fmt(o.deliveredAt) + (o.iccid ? " (ICCID " + esc(o.iccid) + ")" : "") + "</b>" : "")) : "No order from the bot in this chat yet. Search for the plan below.";
       if (!d.apiConnected) { $("dlvCheck").textContent = "eSIMCard isn't connected (ESIMCARD_TOKEN missing)."; return; }
       if (!d.plan) { $("dlvCheck").textContent = "Pick a plan to deliver."; return; }
       if (!d.package) { $("dlvCheck").innerHTML = "⚠️ <b>" + esc(d.plan.name) + "</b>: " + esc(d.packageError || "no matching package on eSIMCard. Deliver this one manually."); return; }
@@ -725,15 +727,21 @@
     }, 350);
   };
   $("dlvPick").onchange = function () { if (this.value) dlvLoad(this.value); };
+  function dlvQtyLabel() {
+    var n = Math.max(1, Math.min(10, parseInt($("dlvQty").value, 10) || 1));
+    $("dlvBtn").textContent = n > 1 ? "Buy & send " + n + " eSIMs" : "Buy & send eSIM";
+  }
+  $("dlvQty").oninput = dlvQtyLabel;
   $("dlvBtn").onclick = function () {
     if (!dlv || !dlv.package || !current) return;
     var o = dlv.order;
+    var n = Math.max(1, Math.min(10, parseInt($("dlvQty").value, 10) || 1));
     if (o && o.deliveredAt && o.planId === dlv.plan.planId && !confirm("This order was already delivered on " + fmt(o.deliveredAt) + ". Buy ANOTHER eSIM?")) return;
-    if (!confirm("Buy and send this eSIM to " + current.customerName + "?\n\n" + dlv.package.name + (dlv.package.price != null ? "\nCost: $" + Number(dlv.package.price).toFixed(2) + " from your eSIMCard balance" : "") + "\n\nOnly continue if the payment is confirmed.")) return;
-    $("dlvBtn").disabled = true; $("dlvStatus").className = "status"; $("dlvStatus").textContent = "Buying on eSIMCard and sending… (up to 30 seconds)";
-    api("/admin/api/deliver", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ psid: current.psid, planId: dlv.plan.planId, packageId: dlv.package.id }) })
+    if (!confirm("Buy and send " + (n > 1 ? n + " eSIMs" : "this eSIM") + " to " + current.customerName + "?\n\n" + (n > 1 ? n + " × " : "") + dlv.package.name + (dlv.package.price != null ? "\nCost: $" + (Number(dlv.package.price) * n).toFixed(2) + " from your eSIMCard balance" : "") + "\n\nOnly continue if the payment is confirmed.")) return;
+    $("dlvBtn").disabled = true; $("dlvStatus").className = "status"; $("dlvStatus").textContent = "Buying on eSIMCard and sending" + (n > 1 ? " " + n + " eSIMs, one by one" : "") + "… (up to " + (30 * n) + " seconds)";
+    api("/admin/api/deliver", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ psid: current.psid, planId: dlv.plan.planId, packageId: dlv.package.id, quantity: n }) })
       .then(function (r) {
-        $("dlvStatus").className = "status ok"; $("dlvStatus").textContent = "✓ Delivered! QR and install links sent" + (r.iccid ? ". ICCID " + r.iccid + " saved." : ".");
+        $("dlvStatus").className = "status ok"; $("dlvStatus").textContent = "✓ Delivered" + (n > 1 ? " all " + n + " eSIMs" : "") + "! QR and install links sent" + (r.iccids ? ". ICCIDs " + r.iccids.join(", ") + " saved." : r.iccid ? ". ICCID " + r.iccid + " saved." : ".");
         loadMessages(); loadEsims(); setBotBadge(true); setTimeout(function () { dlvLoad(dlv.plan.planId, true); }, 1500);
       })
       .catch(function (e) { $("dlvStatus").className = "status err"; $("dlvStatus").textContent = "Not delivered: " + e.message; $("dlvBtn").disabled = false; });
