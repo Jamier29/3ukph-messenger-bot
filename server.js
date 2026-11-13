@@ -1771,6 +1771,7 @@ app.post("/admin/api/deliver", requireAdmin, async (req, res) => {
   const results = [];
   try {
     for (let i = 1; i <= qty; i++) {
+      if (i > 1) await new Promise((r) => setTimeout(r, 5000)); // let eSIMCard list the previous eSIM first
       const r = await deliverEsim(psid, b.planId, { packageId: b.packageId, label: qty > 1 ? `eSIM ${i} of ${qty}` : "" });
       results.push(r);
     }
@@ -1928,6 +1929,7 @@ async function handlePaidCheckout(id, source) {
       let costTotal = 0;
       for (let i = 1; i <= qty; i++) {
         try {
+          if (i > 1) await new Promise((r) => setTimeout(r, 5000)); // let eSIMCard list the previous eSIM first
           const r = await deliverEsim(psid, order.planId, {
             auto: true, paidPHP: Math.round((order.pricePHP / qty) * 100) / 100, reference: qty > 1 ? `${order.ref}-${i}` : order.ref,
             method: order.method ? `${order.method} (PayMongo)` : "PayMongo", email: order.email, label: qty > 1 ? `eSIM ${i} of ${qty}` : ""

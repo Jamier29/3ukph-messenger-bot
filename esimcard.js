@@ -401,9 +401,20 @@ function simInfo(obj) {
   return f;
 }
 // Buy one package. Returns { iccid, lpa, smdp, matching, ios, android, raw }.
+// ICCIDs this server bought recently. eSIMCard's account list can lag a few seconds behind a purchase, so when
+// several eSIMs are bought back to back (e.g. 2 x China for one order), the previous eSIM may still look "new"
+// and the next purchase couldn't tell which one was its own. Excluding our own recent purchases fixes that.
+const recentBought = new Map(); // iccid -> time
+function rememberBought(iccid) {
+  if (!iccid) return;
+  recentBought.set(String(iccid), Date.now());
+  for (const [k, t] of recentBought) if (Date.now() - t > 6 * 3600000) recentBought.delete(k);
+}
+
 async function purchase(packageId) {
   const startedAt = Date.now();
   const before = await loadIndex().then((i) => new Set(i.map.keys())).catch(() => null);
+  if (before) for (const ic of recentBought.keys()) before.add(ic);
   const res = await call("package/purchase", { package_type_id: packageId });
   if (res && res.status === false) throw new Error("eSIMCard refused the purchase: " + (res.message || JSON.stringify(res).slice(0, 200)));
   let info = simInfo(res);
@@ -412,10 +423,11 @@ async function purchase(packageId) {
     await new Promise((r) => setTimeout(r, 4000));
     const idx = await loadIndex().catch(() => null);
     if (!idx) continue;
-    const fresh = [...idx.map.entries()].filter(([ic, e]) => (before ? !before.has(ic) : Date.parse(e.created_at || 0) >= startedAt - 60000));
+    const fresh = [...idx.map.entries()].filter(([ic, e]) => !recentBought.has(ic) && (before ? !before.has(ic) : Date.parse(e.created_at || 0) >= startedAt - 60000));
     if (fresh.length === 1) info = { ...simInfo(fresh[0][1]), ...Object.fromEntries(Object.entries(info).filter(([, v]) => v)) };
   }
   simIndex.at = 0; // refresh the list next time
+  rememberBought(info.iccid);
   return { ...info, raw: res };
 }
 
