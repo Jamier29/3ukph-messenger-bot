@@ -2325,12 +2325,33 @@ app.post("/admin/api/reseller", requireAdmin, async (req, res) => {
     res.json({ ok: true, member });
   } catch (e) { res.status(502).json({ error: e.message }); }
 });
+// Staff numbers that order for a reseller and share its wallet.
+app.get("/admin/api/reseller/staff", requireAdmin, async (req, res) => {
+  const owner = String(req.query.owner || "");
+  if (!/^(wa)?\d+$/.test(owner)) return res.status(400).json({ error: "Bad id." });
+  try {
+    const staff = await reseller.listStaff(owner);
+    res.json({ owner, staff: await Promise.all(staff.map(async (id) => ({ id, name: await getCustomerName(id).catch(() => id) }))) });
+  } catch (e) { res.status(502).json({ error: e.message }); }
+});
+app.post("/admin/api/reseller/staff", requireAdmin, async (req, res) => {
+  const b = req.body || {};
+  const owner = String(b.owner || "");
+  if (!/^(wa)?\d+$/.test(owner)) return res.status(400).json({ error: "Open a reseller first." });
+  try {
+    const id = b.remove ? await reseller.removeStaff(owner, b.staff) : await reseller.addStaff(owner, b.staff);
+    appendNote(id, b.remove ? "[ADMIN UPDATE: this number is no longer staff of a reseller. Use regular retail prices from now on.]"
+      : "[ADMIN UPDATE: this number is now STAFF of an approved reseller and gets reseller prices; Wallet orders use the reseller's shared wallet. Call get_plan again before confirming any plan.]");
+    res.json({ ok: true, id, staff: await reseller.listStaff(owner) });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
 app.get("/admin/api/resellers", requireAdmin, async (req, res) => {
   try {
     const members = await reseller.listMembers();
     const withWallets = await Promise.all(members.map(async (m) => {
       const [balance, ledger] = await Promise.all([reseller.getBalance(m.psid), reseller.getLedger(m.psid, 1000)]);
-      return { ...m, balance, ...reseller.summarize(ledger) };
+      const staff = await reseller.listStaff(m.psid).catch(() => []);
+      return { ...m, balance, staffCount: staff.length, ...reseller.summarize(ledger) };
     }));
     res.json({ members: withWallets, costs: reseller.getCostsInfo() });
   } catch (e) { res.status(502).json({ error: e.message }); }
@@ -3104,7 +3125,9 @@ async function getClaudeReply(senderId, userText) {
   const kitUrl = member ? await kitLink(senderId).catch(() => null) : null;
   const resellerContext = member
     ? `\n\n--- THIS CHAT ---\nThe person you are chatting with is an APPROVED ${member.tier === "gold" ? "GOLD" : "STARTER"} RESELLER` +
-      `${member.name ? `; their name is ${member.name}, so address them by that name` : ""}. In search and get_plan results for this person, "price" IS their reseller price (what they pay us), ` +
+      (member.staffOf
+        ? ` -- a STAFF member ordering for the ${member.tier === "gold" ? "Gold " : ""}reseller ${member.name || "account"}. They get the same reseller prices, and Wallet orders are paid from ${member.name || "the reseller"}'s shared wallet (the balance you see is that shared wallet). Don't call them by the reseller's name; use their own name if they give it`
+        : `${member.name ? `; their name is ${member.name}, so address them by that name` : ""}`) + `. In search and get_plan results for this person, "price" IS their reseller price (what they pay us), ` +
       `"retailPrice" is our public price and "resellerProfitIfSoldAtRetail" is their profit. Whenever you list or quote plans to them, ` +
       `ALWAYS show for EACH plan all three: retail price, their reseller price, and their profit per sale, one line per plan, e.g. ` +
       `"- 10GB 30 days: retail ₱X | your price ₱Y | your profit ₱Z". Never leave out the profit. Use "price" as confirmedPrice in create_order. ` +
@@ -3132,11 +3155,14 @@ async function getClaudeReply(senderId, userText) {
     const customerRec = await getCustomerRecord(senderId);
     let greeting = "";
     if (member) {
-      const first = realFirstName(member.name) || realFirstName(await getCustomerName(senderId));
+      const first = (member.staffOf ? null : realFirstName(member.name)) || realFirstName(await getCustomerName(senderId));
       let bal = "";
       if (member.tier === "gold") { try { bal = formatPHP(await reseller.getBalance(senderId)); } catch { /* ignore */ } }
-      greeting = `Welcome back${first ? ", " + first : ""}! 👋 Thanks for being a 3UK Philippines ${member.tier === "gold" ? "Gold" : "Starter"} reseller.` +
-        (bal ? ` Your wallet balance is ${bal}.` : "");
+      greeting = member.staffOf
+        ? `Welcome${first ? ", " + first : ""}! 👋 You're ordering for ${member.name || "your company"}, a 3UK Philippines ${member.tier === "gold" ? "Gold" : "Starter"} reseller, so you get the reseller prices.` +
+          (bal ? ` The shared wallet balance is ${bal}.` : "")
+        : `Welcome back${first ? ", " + first : ""}! 👋 Thanks for being a 3UK Philippines ${member.tier === "gold" ? "Gold" : "Starter"} reseller.` +
+          (bal ? ` Your wallet balance is ${bal}.` : "");
     } else if (customerRec && customerRec.orders > 0) {
       const first = realFirstName(await getCustomerName(senderId));
       greeting = `Welcome back${first ? ", " + first : ""}! 👋 So glad to see you again at 3UK Philippines.`;

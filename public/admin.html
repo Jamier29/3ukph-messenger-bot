@@ -293,6 +293,11 @@
         <button id="txBtn" title="Save this wallet change">Save</button>
       </div>
       <div class="status" id="txStatus"></div>
+      <h2 style="margin-top:14px">Staff numbers</h2>
+      <p class="help">Extra WhatsApp numbers that order for this reseller: they get the same reseller prices, and Wallet orders are paid from this one wallet. Their orders show "by staff +63…" in the history below.</p>
+      <div id="staffList" class="help">Loading…</div>
+      <div class="row" style="margin-top:6px"><input type="tel" id="staffNum" placeholder="WhatsApp number, e.g. +63 917 123 4567" style="max-width:260px"><button class="ghost" id="staffAddBtn">Add staff number</button></div>
+      <div class="status" id="staffStatus"></div>
       <h2 style="margin-top:14px">API access</h2>
       <p class="help">Lets this partner's website order automatically, paid from this wallet. Docs for their developer: <a href="/partner/docs" target="_blank">3ukph.com/partner/docs</a></p>
       <div id="apiKeyBox" class="help">Loading…</div>
@@ -782,7 +787,7 @@
       m.forEach(function (x) {
         var el = document.createElement("div"); el.className = "member";
         el.innerHTML = "<b>" + esc(x.name || x.psid) + '</b> <span class="badge ok">' + (x.tier === "gold" ? "Gold" : "Starter") + "</span><br>" +
-          (x.contact ? "<span>" + esc(x.contact) + "</span><br>" : "") + "<span>Balance <b>" + peso(x.balance) + "</b> · " + x.ordersThisMonth + " order(s) this month · " + peso(x.purchased) + " purchased in total</span>";
+          (x.contact ? "<span>" + esc(x.contact) + "</span><br>" : "") + "<span>Balance <b>" + peso(x.balance) + "</b> · " + x.ordersThisMonth + " order(s) this month · " + peso(x.purchased) + " purchased in total" + (x.staffCount ? " · " + x.staffCount + " staff number" + (x.staffCount > 1 ? "s" : "") : "") + "</span>";
         el.onclick = function () { openWallet(x.psid, x.name); };
         $("memberList").appendChild(el);
       });
@@ -796,7 +801,7 @@
   function openWallet(psid, name) {
     walletPsid = psid; walletName = name || psid;
     $("walletCard").classList.remove("hidden"); $("walletTitle").textContent = "Wallet: " + walletName; $("txStatus").textContent = "";
-    $("apiKeyStatus").textContent = ""; loadWallet(); loadApiKey();
+    $("apiKeyStatus").textContent = ""; $("staffStatus").textContent = ""; loadWallet(); loadApiKey(); loadStaff();
     setTimeout(function () { $("walletCard").scrollIntoView({ behavior: "smooth" }); }, 50);
   }
 
@@ -840,6 +845,37 @@
           }).join("")
         : "<tr><td class='help'>No wallet activity yet.</td></tr>";
     }).catch(function (e) { $("txStatus").className = "status err"; $("txStatus").textContent = e.message; });
+  }
+
+  function showStaff(list) {
+    $("staffList").innerHTML = list.length ? "" : "No staff numbers yet.";
+    list.forEach(function (x) {
+      var row = document.createElement("div"); row.className = "row"; row.style.gap = "8px";
+      var num = String(x.id).replace(/^wa/, "+");
+      row.innerHTML = "<span><b>" + esc(num) + "</b>" + (x.name && x.name !== x.id && x.name.indexOf(num.slice(1)) < 0 ? " · " + esc(x.name) : "") + "</span>";
+      var btn = document.createElement("button"); btn.className = "ghost"; btn.textContent = "Remove";
+      btn.onclick = function () {
+        if (!confirm("Remove " + num + " as staff of " + walletName + "? They will see retail prices again.")) return;
+        api("/admin/api/reseller/staff", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ owner: walletPsid, staff: x.id, remove: true }) })
+          .then(function () { $("staffStatus").className = "status ok"; $("staffStatus").textContent = "✓ Removed " + num + "."; loadStaff(); })
+          .catch(function (e) { $("staffStatus").className = "status err"; $("staffStatus").textContent = e.message; });
+      };
+      row.appendChild(btn); $("staffList").appendChild(row);
+    });
+  }
+  function loadStaff() {
+    if (!walletPsid) return;
+    api("/admin/api/reseller/staff?owner=" + encodeURIComponent(walletPsid)).then(function (d) { showStaff(d.staff || []); })
+      .catch(function (e) { $("staffList").textContent = e.message; });
+  }
+  function addStaff() {
+    var n = $("staffNum").value.trim();
+    if (!n) { $("staffStatus").className = "status err"; $("staffStatus").textContent = "Enter a WhatsApp number."; return; }
+    $("staffAddBtn").disabled = true;
+    api("/admin/api/reseller/staff", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ owner: walletPsid, staff: n }) })
+      .then(function (d) { $("staffNum").value = ""; $("staffStatus").className = "status ok"; $("staffStatus").textContent = "✓ Added " + String(d.id).replace(/^wa/, "+") + ". They get " + walletName + "'s prices and wallet."; loadStaff(); })
+      .catch(function (e) { $("staffStatus").className = "status err"; $("staffStatus").textContent = e.message; })
+      .then(function () { $("staffAddBtn").disabled = false; });
   }
 
   function saveTx() {
@@ -910,6 +946,7 @@
   $("esimAddBtn").onclick = addEsim;
   $("lookBtn").onclick = lookIccid;
   $("txBtn").onclick = saveTx;
+  $("staffAddBtn").onclick = addStaff;
   $("csvBtn").onclick = walletCsv;
   function partnerSheet(scope) {
     $("sheetStatus").className = "status"; $("sheetStatus").textContent = "Preparing the Excel file…";

@@ -125,11 +125,20 @@ function resellerPrice(rawPlan, tier, rate) {
 }
 
 // --- Members ---------------------------------------------------------------
-async function getMember(psid) {
+async function getOwnMember(psid) {
   if (!psid) return null;
   if (!redis) return membersMemory.get(psid) || null;
   const v = await redis(["GET", `reseller:member:${psid}`]);
   try { return v ? JSON.parse(v) : null; } catch { return null; }
+}
+// A staff number (see "Staff numbers" below) is treated as its Gold reseller: same tier, same prices, same wallet.
+async function getMember(psid) {
+  const own = await getOwnMember(psid);
+  if (own) return own;
+  const owner = await ownerOf(psid);
+  if (owner === psid) return null;
+  const rec = await getOwnMember(owner);
+  return rec ? { ...rec, staffOf: owner } : null;
 }
 
 async function setMember(psid, record) {
@@ -149,15 +158,19 @@ async function listMembers() {
   const keys = (await redis(["KEYS", "reseller:member:*"])) || [];
   const out = [];
   for (const k of keys.slice(0, 200)) {
-    const r = await getMember(k.split(":").pop()).catch(() => null);
+    const r = await getOwnMember(k.split(":").pop()).catch(() => null);
     if (r) out.push({ psid: k.split(":").pop(), ...r });
   }
   return out.sort((a, b) => String(a.since).localeCompare(String(b.since)));
 }
 
+const STAFF_SEED = process.env.RESELLER_STAFF != null ? process.env.RESELLER_STAFF
+  : "wa639173211617=wa639176262242|wa639285198783|wa639088741602|wa639088647259"; // TRIPHAPPY.PH staff
 function init(redisFn) {
   redis = redisFn;
-  return loadCosts();
+  const p = loadCosts();
+  Promise.resolve(p).catch(() => {}).then(() => seedStaff(STAFF_SEED)).catch((e) => console.error("[reseller] staff seed failed:", e.message));
+  return p;
 }
 
 function getCostsInfo() {
@@ -176,6 +189,7 @@ const ledgerMemory = new Map();
 const cents = (php) => Math.round(Number(php) * 100);
 
 async function getBalance(psid) {
+  psid = await ownerOf(psid);
   if (!redis) return (walletMemory.get(psid) || 0) / 100;
   return (Number(await redis(["GET", `reseller:wallet:${psid}`])) || 0) / 100;
 }
@@ -193,6 +207,7 @@ async function addLedger(psid, entry) {
 }
 
 async function getLedger(psid, limit = 200) {
+  psid = await ownerOf(psid);
   if (!redis) return (ledgerMemory.get(psid) || []).slice(0, limit);
   const rows = (await redis(["LRANGE", `reseller:ledger:${psid}`, 0, limit - 1])) || [];
   return rows.map((r) => { try { return JSON.parse(r); } catch { return null; } }).filter(Boolean);
@@ -222,6 +237,7 @@ async function walletTransaction(psid, { type, amountPHP, note, by }) {
   const amt = Math.round(Number(amountPHP) * 100) / 100;
   if (!Number.isFinite(amt) || amt === 0 || Math.abs(amt) > 1000000) throw new Error("Enter a valid amount.");
   if (type !== "adjust" && amt < 0) throw new Error("Top-ups and refunds must be positive.");
+  psid = await ownerOf(psid);
   const r = await changeBalance(psid, amt, true);
   const entry = await addLedger(psid, { type, amount: amt, balanceAfter: r.balance, note: String(note || "").slice(0, 200), by: by || "admin" });
   return { balance: r.balance, entry };
@@ -229,16 +245,18 @@ async function walletTransaction(psid, { type, amountPHP, note, by }) {
 
 // Bot: a reseller order paid from the wallet. Deducts only if the balance covers it.
 async function walletOrder(psid, { pricePHP, plan, retailPHP, email }) {
-  const r = await changeBalance(psid, -pricePHP, false);
+  const w = await ownerOf(psid);
+  const r = await changeBalance(w, -pricePHP, false);
   if (!r.ok) return { ok: false, balance: r.balance };
-  const entry = await addLedger(psid, { type: "order", method: "Wallet", amount: -pricePHP, balanceAfter: r.balance, plan, retail: retailPHP, email, status: "paid from wallet" });
+  const entry = await addLedger(w, { type: "order", method: "Wallet", amount: -pricePHP, balanceAfter: r.balance, plan, retail: retailPHP, email, status: "paid from wallet" + staffNote(psid, w) });
   return { ok: true, balance: r.balance, entry };
 }
 
 // Bot: a reseller order paid another way (GCash etc.) -- logged, balance unchanged.
 async function logOrder(psid, { pricePHP, plan, retailPHP, method, email }) {
-  const balance = await getBalance(psid);
-  return addLedger(psid, { type: "order", method, amount: 0, price: pricePHP, balanceAfter: balance, plan, retail: retailPHP, email, status: `awaiting ${method} payment` });
+  const w = await ownerOf(psid);
+  const balance = await getBalance(w);
+  return addLedger(w, { type: "order", method, amount: 0, price: pricePHP, balanceAfter: balance, plan, retail: retailPHP, email, status: `awaiting ${method} payment` + staffNote(psid, w) });
 }
 
 function summarize(ledger) {
@@ -268,4 +286,70 @@ async function getApplicant(psid) {
   try { return v ? JSON.parse(v) : null; } catch { return null; }
 }
 
-Object.assign(module.exports, { saveApplicant, getApplicant, getBalance, getLedger, walletTransaction, walletOrder, logOrder, summarize });
+
+// --- Staff numbers ---------------------------------------------------------
+// Extra chat ids (e.g. a travel agency's staff WhatsApp numbers) that order as a Gold reseller:
+// they see the reseller's prices and every order is paid from the reseller's ONE wallet.
+//   reseller:staff:<staffId>   = ownerId
+//   reseller:staffof:<ownerId> = set of staffIds
+// Render setting (optional, applied once): RESELLER_STAFF = "owner=staff1|staff2;owner2=staff3"
+const staffMemory = new Map();
+const staffNote = (psid, owner) => (psid !== owner ? ` · by staff ${String(psid).replace(/^wa/, "+")}` : "");
+async function ownerOf(psid) {
+  if (!psid) return psid;
+  let v = null;
+  if (redis) { try { v = await redis(["GET", `reseller:staff:${psid}`]); } catch (_) { v = null; } }
+  else v = staffMemory.get(String(psid)) || null;
+  return v || psid;
+}
+async function listStaff(owner) {
+  if (!redis) return [...staffMemory].filter(([, o]) => o === owner).map(([k]) => k);
+  return ((await redis(["SMEMBERS", `reseller:staffof:${owner}`])) || []).sort();
+}
+function normId(id) {
+  const t = String(id || "").trim();
+  if (/^wa\d+$/.test(t)) return t;
+  let d = t.replace(/\D/g, "");
+  if (/^09\d{9}$/.test(d)) d = "63" + d.slice(1);
+  if (/^\d{15,}$/.test(d) && !t.startsWith("+")) return d; // a Messenger chat id
+  return "wa" + d; // a WhatsApp number
+}
+async function addStaff(owner, staffId) {
+  const s = normId(staffId);
+  if (!/^(wa)?\d{6,}$/.test(s)) throw new Error("Bad number.");
+  if (s === owner) throw new Error("That is the reseller's own number.");
+  const o = await getOwnMember(owner);
+  if (!o) throw new Error("Approve this chat as a reseller first.");
+  if (await getOwnMember(s)) throw new Error(`${s.replace(/^wa/, "+")} is itself a reseller. Remove it as a reseller first.`);
+  const prev = await ownerOf(s);
+  if (prev !== s && prev !== owner) throw new Error(`${s.replace(/^wa/, "+")} is already staff of another reseller.`);
+  if (redis) { await redis(["SET", `reseller:staff:${s}`, owner]); await redis(["SADD", `reseller:staffof:${owner}`, s]); }
+  else staffMemory.set(s, owner);
+  return s;
+}
+async function removeStaff(owner, staffId) {
+  const s = normId(staffId);
+  if (redis) { await redis(["DEL", `reseller:staff:${s}`]); await redis(["SREM", `reseller:staffof:${owner}`, s]); }
+  else if (staffMemory.get(s) === owner) staffMemory.delete(s);
+  return s;
+}
+// One-time seed from RESELLER_STAFF (each owner/staff pair is added only once, so removing in the console sticks).
+async function seedStaff(spec) {
+  for (const part of String(spec || "").split(";")) {
+    const [owner, list] = part.split("=");
+    if (!owner || !list) continue;
+    for (const st of list.split("|")) {
+      const s = normId(st), o = normId(owner);
+      try {
+        if (redis && (await redis(["SET", `reseller:staffseed:${o}:${s}`, "1", "NX"])) !== "OK") continue;
+        await addStaff(o, s);
+        console.log(`[reseller] staff ${s} -> ${o}`);
+      } catch (e) {
+        console.error(`[reseller] staff seed ${s} failed:`, e.message);
+        if (redis) await redis(["DEL", `reseller:staffseed:${o}:${s}`]).catch(() => {});
+      }
+    }
+  }
+}
+
+Object.assign(module.exports, { ownerOf, listStaff, addStaff, removeStaff, seedStaff, normId, saveApplicant, getApplicant, getBalance, getLedger, walletTransaction, walletOrder, logOrder, summarize });
