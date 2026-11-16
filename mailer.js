@@ -115,4 +115,24 @@ async function sendEsimEmail(d) {
   return { id: j.id };
 }
 
-module.exports = { configured, validEmail, sendEsimEmail, buildHtml };
+// Sign-in code for the 3UK mobile app.
+async function sendLoginCode(to, code) {
+  if (!configured()) throw new Error("Email is not set up.");
+  if (!validEmail(to)) throw new Error("Bad email.");
+  const html = `<div style="font-family:Arial,Helvetica,sans-serif;max-width:460px;margin:0 auto;padding:24px;color:#15204a">
+<img src="${SITE}/logo.png" width="72" height="72" alt="3UK Philippines" style="display:block;margin:0 auto 12px">
+<h2 style="text-align:center;color:#0e2578;margin:0 0 8px">Your 3UK sign-in code</h2>
+<p style="text-align:center;color:#3b4570;margin:0 0 18px">Enter this code in the 3UK Philippines app:</p>
+<div style="text-align:center;font-size:34px;font-weight:700;letter-spacing:8px;background:#f1f5fd;border-radius:14px;padding:16px 0;color:#0e2578">${esc(code)}</div>
+<p style="text-align:center;color:#6b7695;font-size:13px;margin-top:18px">The code expires in 10 minutes. If you didn't ask for it, you can ignore this email.</p></div>`;
+  const r = await fetch("https://api.resend.com/emails", {
+    method: "POST", headers: { Authorization: `Bearer ${API_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ from: FROM, to: [String(to).trim()], reply_to: REPLY_TO, subject: `${code} is your 3UK sign-in code`, html,
+      text: `Your 3UK Philippines sign-in code is ${code}. It expires in 10 minutes. If you didn't ask for it, ignore this email.` })
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(`Email not sent (${r.status}): ${j.message || j.name || "unknown error"}`);
+  return { id: j.id };
+}
+
+module.exports = { configured, validEmail, sendEsimEmail, sendLoginCode, buildHtml };

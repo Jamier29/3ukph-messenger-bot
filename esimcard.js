@@ -31,7 +31,7 @@ async function saveList(customerId, list) {
   if (!redis) { memory.set(customerId, list); return; }
   await redis(["SET", `esims:${customerId}`, JSON.stringify(list)]);
 }
-async function addEsim(customerId, rec) {
+async function addEsim(customerId, rec, { index = true } = {}) {
   const iccid = cleanIccid(rec.iccid);
   if (!isIccid(iccid)) throw new Error("That doesn't look like an ICCID (it starts with 89 and has 18-22 digits).");
   const list = await listEsims(customerId);
@@ -41,11 +41,12 @@ async function addEsim(customerId, rec) {
     plan: String(rec.plan || "").slice(0, 120),
     email: String(rec.email || "").slice(0, 120),
     note: String(rec.note || "").slice(0, 200),
+    ...(/^LPA:1\$/i.test(String(rec.lpa || "")) ? { lpa: String(rec.lpa).slice(0, 300) } : {}),
     addedAt: new Date().toISOString()
   };
   list.unshift(entry);
   await saveList(customerId, list.slice(0, 100));
-  if (redis) await redis(["SET", `esim:iccid:${iccid}`, customerId]);
+  if (redis && index) await redis(["SET", `esim:iccid:${iccid}`, customerId]);
   return entry;
 }
 async function removeEsim(customerId, iccid) {

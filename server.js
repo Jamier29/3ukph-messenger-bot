@@ -74,6 +74,7 @@ const pm = require("./paymongo");
 const { tripContext } = require("./tripAdvisor");
 const esims = require("./esimcard");
 const mailer = require("./mailer");
+const appApi = require("./appApi");
 
 const app = express();
 // Admin image uploads (QR codes) are bigger than normal requests.
@@ -1241,6 +1242,9 @@ app.get("/bir-seal-badge.png", (req, res) => res.sendFile(path.join(__dirname, "
 app.use("/app", express.static(path.join(__dirname, "public", "app"), { maxAge: "1d" }));
 app.get("/sw.js", (req, res) => { res.set("Cache-Control", "no-cache"); res.set("Service-Worker-Allowed", "/"); res.type("application/javascript").sendFile(path.join(__dirname, "public", "app", "sw.js")); });
 app.get("/favicon.png", (req, res) => res.sendFile(path.join(__dirname, "public", "favicon.png")));
+// 3UK mobile app: accounts (email + code), checkout, My eSIMs. See appApi.js.
+appApi.install(app, { redis: (c) => redis(c), hasDb: () => hasDb(), mailer, esims, pm, getPlan, getRawPlan, reseller, publicUrl: PUBLIC_URL,
+  pmSaveOrder: (id, o) => pmSaveOrder(id, o), pmGetOrder: (id) => pmGetOrder(id), notifyAdmin: (x) => notifyAdmin(x), express });
 // Public plan-finder API used by the website (peso prices only, no cost data)
 app.get("/api/destinations", (req, res) => res.json(listAllDestinations()));
 app.get("/api/plans", (req, res) => {
@@ -1731,7 +1735,9 @@ async function deliverEsim(psid, planId, opts = {}) {
       }
     }
     if (sim.iccid) {
-      try { await esims.addEsim(psid, { iccid: sim.iccid, plan: plan.name, email: (order && order.email) || "", note: opts.auto ? "Auto-delivered (PayMongo)" : "Auto-delivered" }); } catch (e) { console.error("[deliver] save ICCID:", e.message); }
+      try { await esims.addEsim(psid, { iccid: sim.iccid, plan: plan.name, email: emailTo || "", lpa: sim.lpa, note: opts.auto ? "Auto-delivered (PayMongo)" : "Auto-delivered" }); } catch (e) { console.error("[deliver] save ICCID:", e.message); }
+      // Also list it under the email, so it shows in the 3UK app for whoever signs in with that email.
+      if (mailer.validEmail(emailTo)) esims.addEsim("email:" + appApi.normEmail(emailTo), { iccid: sim.iccid, plan: plan.name, email: emailTo, lpa: sim.lpa, note: "by email" }, { index: false }).catch(() => {});
     }
     await saveLastOrder(psid, { ...(order && order.planId === plan.planId ? order : { planId: plan.planId, plan: plan.name, price: plan.price, method: opts.auto ? "PayMongo" : "(chosen in console)", at: new Date().toISOString() }), deliveredAt: new Date().toISOString(), iccid: sim.iccid || null });
     appendNote(psid, `[ADMIN UPDATE: The customer's eSIM (${plan.name}${sim.iccid ? ", ICCID ending " + sim.iccid.slice(-4) : ""}) was just delivered with its QR code and install links. Help them install it if they ask. Use check_data_usage for data questions.]`);
@@ -2035,6 +2041,16 @@ app.post("/api/web-checkout", express.json({ limit: "10kb" }), async (req, res) 
 
 app.get("/paid", (req, res) => {
   const web = req.query.web === "1";
+  if (req.query.app === "1") {
+    const cancel = req.query.cancel === "1";
+    return res.type("html").send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${cancel ? "Payment cancelled" : "Payment received"} | 3UK Philippines</title>
+<style>body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#f4f7fc;color:#15204a;display:flex;min-height:100vh;align-items:center;justify-content:center}
+.c{background:#fff;max-width:420px;margin:16px;padding:32px 24px;border-radius:20px;box-shadow:0 8px 30px rgba(14,37,120,.12);text-align:center}h1{color:#0e2578;font-size:26px;margin:12px 0}p{line-height:1.5;color:#3b4570}</style></head>
+<body><div class="c"><img src="/logo.png" alt="3UK Philippines" width="90" height="90"><h1>${cancel ? "Payment cancelled" : "Payment received ✅"}</h1>
+${cancel ? "<p>No payment was made. Close this page to go back to the 3UK app and choose another plan anytime.</p>"
+  : "<p>Thank you! Close this page to go back to the <b>3UK app</b>. Your eSIM will appear in <b>My eSIMs</b> within a few minutes, and we'll also email it to you.</p>"}
+<p style="font-size:14px;color:#6b7695">Tap ✕ or the back button to close.</p></div></body></html>`);
+  }
   res.type("html").send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Payment received | 3UK Philippines</title>
 <style>body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#f4f7fc;color:#15204a;display:flex;min-height:100vh;align-items:center;justify-content:center}
 .c{background:#fff;max-width:420px;margin:16px;padding:32px 24px;border-radius:20px;box-shadow:0 8px 30px rgba(14,37,120,.12);text-align:center}
