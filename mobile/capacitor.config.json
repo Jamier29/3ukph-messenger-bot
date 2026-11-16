@@ -1,0 +1,11 @@
+{
+  "appId": "com.threeukph.esim",
+  "appName": "3UK eSIM",
+  "webDir": "www",
+  "android": { "allowMixedContent": false, "captureInput": true },
+  "server": { "androidScheme": "https" },
+  "plugins": {
+    "SplashScreen": { "launchShowDuration": 1500, "launchAutoHide": false, "backgroundColor": "#13246e", "showSpinner": false },
+    "StatusBar": { "style": "DARK", "backgroundColor": "#13246e", "overlaysWebView": false }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "name": "3uk-esim-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "3UK Philippines eSIM app (Android)",
+  "scripts": {
+    "build": "esbuild src/main.js --bundle --minify --target=es2019 --outfile=www/app.js",
+    "sync": "npm run build && cap sync android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.6.2",
+    "@capacitor/app": "^8.1.2",
+    "@capacitor/browser": "^8.0.5",
+    "@capacitor/clipboard": "^8.0.1",
+    "@capacitor/core": "^8.6.2",
+    "@capacitor/preferences": "^8.0.1",
+    "@capacitor/splash-screen": "^8.0.2",
+    "@capacitor/status-bar": "^8.0.4",
+    "qrcode-generator": "^1.4.4"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.6.2",
+    "esbuild": "^0.24.2"
+  }
+}

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#13246e">
+  <title>3UK eSIM</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="top">
+    <button class="back hidden" id="backBtn" aria-label="Back">‹</button>
+    <img src="img/logo.png" alt="" class="toplogo" id="topLogo">
+    <h1 id="topTitle">3UK eSIM</h1>
+  </header>
+
+  <main id="view"></main>
+
+  <nav class="tabs" id="tabs">
+    <button data-tab="shop" class="on"><span class="ti">🌏</span>Shop</button>
+    <button data-tab="esims"><span class="ti">📶</span>My eSIMs</button>
+    <button data-tab="account"><span class="ti">👤</span>Account</button>
+  </nav>
+
+  <div class="sheet-bg hidden" id="sheetBg"></div>
+  <section class="sheet hidden" id="sheet" role="dialog" aria-modal="true"></section>
+  <div class="toast hidden" id="toast"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

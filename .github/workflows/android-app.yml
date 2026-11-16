@@ -1,0 +1,42 @@
+name: Android app
+
+# Builds the 3UK eSIM Android app (mobile/) and saves the test APK to the "apk-builds" branch.
+on:
+  push:
+    branches: [main]
+    paths: ["mobile/**", ".github/workflows/android-app.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "21" }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - name: Build web app and sync Android project
+        working-directory: mobile
+        run: |
+          npm ci
+          npm run build
+          npx cap sync android
+      - name: Build APK
+        working-directory: mobile/android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleDebug
+      - name: Save APK to the apk-builds branch
+        run: |
+          VER=$(node -p "require('./mobile/package.json').version")
+          mkdir -p /tmp/out && cp mobile/android/app/build/outputs/apk/debug/app-debug.apk "/tmp/out/3UK-eSIM-test-$VER.apk"
+          cd /tmp/out
+          git init -q -b apk-builds
+          git config user.name "github-actions" && git config user.email "actions@github.com"
+          echo "Built from ${GITHUB_SHA} on $(date -u +%FT%TZ)" > BUILD.txt
+          git add . && git commit -qm "Test APK $VER (${GITHUB_SHA::7})"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" apk-builds
