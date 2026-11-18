@@ -222,6 +222,21 @@
       <div id="ptList" class="help scrollbox">Loading…</div>
     </section>
 
+    <!-- Morning brief + customers -->
+    <section class="card">
+      <span class="step">Brief &amp; customers</span>
+      <h2>Morning brief and customer list</h2>
+      <p class="help">The morning brief arrives every day at 7:00 AM (Manila) by phone push and email: yesterday's sales and profit, this month so far, and what needs you. The customer list collects every buyer email we know. People marked "unsubscribed" must be left out of promotions.</p>
+      <div class="row" style="margin-bottom:10px">
+        <button class="ghost" id="brPreview">Preview today's brief</button>
+        <button class="ghost" id="brSend">Send brief now</button>
+        <button class="ghost" id="cuLoad">Show customers</button>
+        <button class="ghost" id="cuCsv">⬇ Customers CSV</button>
+      </div>
+      <div class="status" id="brStatus"></div>
+      <div id="brOut" class="help scrollbox" style="white-space:pre-wrap"></div>
+    </section>
+
     <!-- Reseller Marketing Kit -->
     <section class="card">
       <span class="step">Marketing Kit</span>
@@ -636,6 +651,27 @@
     var blob = new Blob(["\ufeff" + lines.join("\n")], { type: "text/csv" });
     var a = document.createElement("a"); a.href = URL.createObjectURL(blob);
     a.download = "3UK-partner-commission-" + (ptData.month || "all") + ".csv"; document.body.appendChild(a); a.click(); a.remove();
+  };
+  $("brPreview").onclick = function () {
+    $("brOut").textContent = "Loading…";
+    api("/admin/api/brief").then(function (d) { $("brOut").textContent = d.text; }).catch(function (e) { $("brOut").textContent = e.message; });
+  };
+  $("brSend").onclick = function () {
+    $("brStatus").className = "status"; $("brStatus").textContent = "Sending…";
+    api("/admin/api/brief?send=1").then(function (d) { $("brStatus").className = "status ok"; $("brStatus").textContent = "✓ Sent to your phone" + (d.emailed ? " and email." : ". (Email not sent: check BRIEF_EMAIL / email setup.)"); $("brOut").textContent = d.text; })
+      .catch(function (e) { $("brStatus").className = "status err"; $("brStatus").textContent = e.message; });
+  };
+  $("cuLoad").onclick = function () {
+    $("brOut").textContent = "Loading…";
+    api("/admin/api/customers").then(function (d) {
+      $("brOut").innerHTML = "<b>" + d.total + " emails</b> · " + d.buyers + " buyers · " + d.unsubscribed + " unsubscribed<br><br>" +
+        d.customers.slice(0, 200).map(function (c) { return esc(c.email) + (c.name ? " · " + esc(c.name) : "") + (c.lastPlan ? " · " + esc(c.lastPlan) + " (" + esc(c.lastDate) + ")" : "") + (c.unsubscribed ? " · <b>unsubscribed</b>" : ""); }).join("<br>");
+    }).catch(function (e) { $("brOut").textContent = e.message; });
+  };
+  $("cuCsv").onclick = function () {
+    fetch("/admin/api/customers?format=csv", { headers: { "x-admin-key": key } }).then(function (r) { if (!r.ok) throw new Error("Error " + r.status); return r.blob(); })
+      .then(function (b) { var a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = "3UK-customers.csv"; document.body.appendChild(a); a.click(); a.remove(); })
+      .catch(function (e) { $("brStatus").className = "status err"; $("brStatus").textContent = e.message; });
   };
   function loadKit() {
     api("/admin/api/kit").then(function (d) {

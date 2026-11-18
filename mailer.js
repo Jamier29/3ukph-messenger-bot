@@ -135,4 +135,16 @@ async function sendLoginCode(to, code) {
   return { id: j.id };
 }
 
-module.exports = { configured, validEmail, sendEsimEmail, sendLoginCode, buildHtml };
+// Plain email from 3UK (owner reports such as the morning brief).
+async function sendRaw({ to, subject, html, text }) {
+  if (!configured()) throw new Error("Email is not set up.");
+  const r = await fetch("https://api.resend.com/emails", {
+    method: "POST", headers: { Authorization: `Bearer ${API_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ from: FROM, to: [String(to).trim()], reply_to: REPLY_TO, subject, html, text })
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(`Email not sent (${r.status}): ${j.message || j.name || "unknown error"}`);
+  return { id: j.id };
+}
+
+module.exports = { configured, validEmail, sendEsimEmail, sendLoginCode, sendRaw, buildHtml };

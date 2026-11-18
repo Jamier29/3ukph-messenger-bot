@@ -142,6 +142,7 @@ function install(app, deps) {
       await db.set(`app:sess:${sha(token)}`, email, SESSION_DAYS * 86400);
       await db.sadd(`app:sessions:${email}`, sha(token));
       if (isNew) notifyAdmin({ title: "New app account 📱", message: email, tags: "iphone" }).catch(() => {});
+      if (isNew) db.incr(`app:newusers:${new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10)}`, 3 * 86400).catch(() => {});
       res.json({ ok: true, token, user: publicUser(user), isNew });
     } catch (e) {
       console.error("[app] login verify:", e.message);

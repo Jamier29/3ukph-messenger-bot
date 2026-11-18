@@ -75,6 +75,7 @@ const { tripContext } = require("./tripAdvisor");
 const esims = require("./esimcard");
 const mailer = require("./mailer");
 const appApi = require("./appApi");
+const brief = require("./brief");
 
 const app = express();
 // Admin image uploads (QR codes) are bigger than normal requests.
@@ -1242,6 +1243,28 @@ app.get("/bir-seal-badge.png", (req, res) => res.sendFile(path.join(__dirname, "
 app.use("/app", express.static(path.join(__dirname, "public", "app"), { maxAge: "1d" }));
 app.get("/sw.js", (req, res) => { res.set("Cache-Control", "no-cache"); res.set("Service-Worker-Allowed", "/"); res.type("application/javascript").sendFile(path.join(__dirname, "public", "app", "sw.js")); });
 app.get("/favicon.png", (req, res) => res.sendFile(path.join(__dirname, "public", "favicon.png")));
+// Morning brief (7 AM Manila), sales log and customer list. See brief.js.
+brief.init({ redis: (c) => redis(c), hasDb: () => hasDb(), mailer, partners, notifyAdmin: (x) => notifyAdmin(x),
+  pendingOrders: () => pendingOrdersList(),
+  pendingApplicants: async () => {
+    if (!hasDb()) return 0;
+    const ks = (await redis(["KEYS", "reseller:applicant:*"]).catch(() => [])) || [];
+    let n = 0; for (const k of ks) if (!(await reseller.getMember(k.split(":").pop()).catch(() => null))) n++;
+    return n;
+  },
+  manualChecks: async () => {
+    if (!hasDb()) return 0;
+    const ks = (await redis(["KEYS", "pm:order:*"]).catch(() => [])) || [];
+    let n = 0;
+    for (let i = 0; i < ks.length; i += 100) {
+      const vs = (await redis(["MGET", ...ks.slice(i, i + 100)]).catch(() => [])) || [];
+      for (const v of vs) { try { const o = JSON.parse(v); if (/admin|manual/i.test(o.status || "") && Date.now() - (o.createdAt || 0) < 7 * 86400000) n++; } catch { /* skip */ } }
+    }
+    return n;
+  } });
+brief.install(app, requireAdmin);
+brief.startScheduler();
+
 // 3UK mobile app: accounts (email + code), checkout, My eSIMs. See appApi.js.
 appApi.install(app, { redis: (c) => redis(c), hasDb: () => hasDb(), mailer, esims, pm, getPlan, getRawPlan, reseller, publicUrl: PUBLIC_URL,
   pmSaveOrder: (id, o) => pmSaveOrder(id, o), pmGetOrder: (id) => pmGetOrder(id), notifyAdmin: (x) => notifyAdmin(x), express });
@@ -1741,6 +1764,13 @@ async function deliverEsim(psid, planId, opts = {}) {
     }
     await saveLastOrder(psid, { ...(order && order.planId === plan.planId ? order : { planId: plan.planId, plan: plan.name, price: plan.price, method: opts.auto ? "PayMongo" : "(chosen in console)", at: new Date().toISOString() }), deliveredAt: new Date().toISOString(), iccid: sim.iccid || null });
     appendNote(psid, `[ADMIN UPDATE: The customer's eSIM (${plan.name}${sim.iccid ? ", ICCID ending " + sim.iccid.slice(-4) : ""}) was just delivered with its QR code and install links. Help them install it if they ask. Use check_data_usage for data questions.]`);
+    {
+      const member = await reseller.getMember(psid).catch(() => null);
+      const paid = opts.paidPHP || (order && order.planId === plan.planId ? Number(order.pricePHP) || Number(String(order.price || "").replace(/[^0-9.]/g, "")) || 0 : 0) || (member ? 0 : plan.pricePHP);
+      brief.recordSale({ psid, name: await getCustomerName(psid).catch(() => ""), email: emailTo, plan: plan.name, paidPHP: paid,
+        costPHP: costUSD ? costUSD * getRate() : 0, method: opts.method || (order && order.method) || (opts.auto ? "PayMongo" : "console"),
+        reseller: !!member, channel: isWa(psid) ? "WhatsApp" : String(psid).startsWith("web_") ? "Website/App" : "Messenger", iccid: sim.iccid });
+    }
     notifyAdmin({ title: opts.auto ? "eSIM auto-delivered ✅" : "eSIM delivered", message: `${await getCustomerName(psid)}\n${plan.name}${sim.iccid ? "\nICCID " + sim.iccid : ""}${costUSD ? `\nCost $${Number(costUSD).toFixed(2)}` : ""}`, tags: "white_check_mark" }).catch(() => {});
     return { ok: true, iccid: sim.iccid || null, steps, costUSD };
   } finally { deliveryLocks.delete(psid); }
@@ -2295,7 +2325,8 @@ app.get("/kit/:token/img/:id.jpg", async (req, res) => {
   } catch (e) { res.status(500).send("Error"); }
 });
 
-app.get("/admin/api/pending-orders", requireAdmin, async (req, res) => {
+app.get("/admin/api/pending-orders", requireAdmin, async (req, res) => res.json({ orders: await pendingOrdersList() }));
+async function pendingOrdersList() {
   const now = Date.now();
   const rows = [];
   for (const [psid, msgs] of Array.from(chatLog.entries())) {
@@ -2306,8 +2337,8 @@ app.get("/admin/api/pending-orders", requireAdmin, async (req, res) => {
     rows.push({ psid, customerName: await getCustomerName(psid), channel: isWa(psid) ? "WhatsApp" : "Messenger", plan: order.plan, price: order.price, method: order.method, at: order.at, paymentProof: proof, followupAt: fu && Date.parse(fu.sentAt) >= Date.parse(order.at) ? fu.sentAt : null });
   }
   rows.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
-  res.json({ orders: rows });
-});
+  return rows;
+}
 
 // --- Reseller program (approve resellers, upload private costs) ---
 app.get("/admin/api/reseller", requireAdmin, async (req, res) => {
