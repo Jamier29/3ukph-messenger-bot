@@ -88,12 +88,27 @@ async function loadDestinations() {
   return state.destinations;
 }
 const SCREENS = {};
+const ROTATE = ["Japan", "Korea", "Hong Kong", "Thailand", "Europe", "the USA", "Vietnam", "Singapore"];
 SCREENS.home = async () => {
-  setTop("3UK eSIM", false);
-  render(`<div class="hero"><h2>Travel data in minutes</h2><p>Buy an eSIM for 190+ destinations. No roaming fees, no pocket WiFi.</p>
-    <div class="search"><input id="q" type="search" placeholder="Where are you going?" autocomplete="off" enterkeyhint="search"></div><div id="sug"></div></div>
-    <h2>Popular destinations</h2><div class="grid" id="pop">${POPULAR.map((d) => `<button class="dest" data-d="${esc(d)}"><b>${esc(d)}</b><span data-from="${esc(d)}">&nbsp;</span></button>`).join("")}</div>
-    <div class="note" style="margin-top:16px">📱 <b>Does my phone support eSIM?</b> Dial <b>*#06#</b>. If you see an <b>EID</b> number, it does. Your phone must also be unlocked (not tied to one network).</div>`);
+  setTop("3UK Philippines", false);
+  render(`<section class="hero">
+      <div class="label">Global connections. Endless possibilities.</div>
+      <h1 class="display">Stay connected in <span class="destw" id="rot">Japan</span></h1>
+      <p class="lede">Travel eSIMs for 200+ destinations. No roaming shock, no SIM swapping.</p>
+      <div class="finder"><label class="flabel" for="q">Destination</label>
+        <div class="search"><input id="q" type="search" placeholder="Where are you going?" autocomplete="off" enterkeyhint="search"></div><div id="sug"></div>
+        <div class="chips" style="margin-top:14px">${POPULAR.slice(0, 8).map((d) => `<button class="chip" data-d="${esc(d)}">${esc(d)}</button>`).join("")}</div></div>
+      <ul class="trust"><li>DTI &amp; BIR-registered</li><li>GCash, Maya &amp; cards</li><li>Delivered in ~5 min</li><li>Open 24/7</li></ul>
+    </section>
+    <div class="label" style="margin-top:6px">Popular</div><h2 class="h2">Where are you going next?</h2>
+    <div class="grid" id="pop">${POPULAR.map((d) => `<button class="dest" data-d="${esc(d)}"><b>${esc(d)}</b><span data-from="${esc(d)}">&nbsp;</span></button>`).join("")}</div>
+    <button class="ship" id="shipCard"><div class="label gold">⚓ By ship</div><b>Working on board or cruising?</b><span>Global Max covers 169 countries in port and near the coast.</span><span class="go">See Global plans ›</span></button>
+    <div class="note">📱 <b>Does my phone support eSIM?</b> Dial <b>*#06#</b>. If you see an <b>EID</b>, it does. Your phone must also be unlocked.</div>`);
+  clearInterval(state.rotT);
+  let ri = 0;
+  state.rotT = setInterval(() => { const el = $("rot"); if (!el) return clearInterval(state.rotT); el.classList.add("out"); setTimeout(() => { ri = (ri + 1) % ROTATE.length; el.textContent = ROTATE[ri]; el.classList.remove("out"); }, 300); }, 2600);
+  document.querySelectorAll(".finder .chip").forEach((b) => (b.onclick = () => go("dest", { d: b.dataset.d })));
+  $("shipCard").onclick = () => go("dest", { d: "Global" });
   document.querySelectorAll("#pop .dest").forEach((b) => (b.onclick = () => go("dest", { d: b.dataset.d })));
   const q = $("q");
   q.oninput = async () => {
@@ -129,10 +144,13 @@ SCREENS.dest = async ({ d, f = "all" }) => {
   const pass = (p) => f === "all" || (f === "unl" && p.unlimitedData) || (f === "d7" && p.validityDays <= 7) || (f === "d15" && p.validityDays > 7 && p.validityDays <= 15) || (f === "d30" && p.validityDays >= 30) || (f === "calls" && p.callsAndTexts);
   const list = all.filter(pass).sort((a, b) => a.validityDays - b.validityDays || a.pricePHP - b.pricePHP).slice(0, 80);
   render(`<div class="filters">${FILTERS.map((x) => `<button class="chip ${x.k === f ? "on" : ""}" data-f="${x.k}">${x.t}</button>`).join("")}</div>
-    ${list.length ? list.map((p) => `<button class="card plan" data-id="${esc(p.planId)}"><div class="pd"><div class="big">${esc(planTitle(p))}</div>
-      <div class="sub">${p.validityDays} day${p.validityDays > 1 ? "s" : ""}${p.scope && p.scope !== "country" ? " · " + esc(p.destination) : ""}</div>
-      <div style="margin-top:5px">${p.callsAndTexts ? '<span class="tag gold">Calls & texts</span>' : ""}${netTag(p) ? `<span class="tag">${esc(netTag(p))}</span>` : ""}</div></div>
-      <div class="pr">${esc(p.price)}</div></button>`).join("")
+    <div class="label">${esc(d)}</div><h2 class="h2" style="margin-top:2px">${all.length} plan${all.length === 1 ? "" : "s"} available</h2>
+    ${list.length ? list.map((p) => `<button class="uk-plan plan" data-id="${esc(p.planId)}">
+      ${p.callsAndTexts ? '<span class="badge gold ptag">Calls &amp; texts</span>' : p.unlimitedData ? '<span class="badge navy ptag">Unlimited</span>' : ""}
+      <div class="ptop"><div><div class="pname">${esc(planTitle(p))}</div>
+      <div class="pspec"><span class="pdata">${esc(p.unlimitedData ? "Unlimited" : p.data)}</span><span>·</span><span>${p.validityDays} day${p.validityDays > 1 ? "s" : ""}</span>${p.scope && p.scope !== "country" ? `<span>·</span><span>${esc(p.destination)}</span>` : ""}</div></div>
+      <div class="pprice">${esc(p.price)}</div></div>
+      ${netTag(p) ? `<div class="pnet">✓ ${esc(netTag(p))}</div>` : ""}</button>`).join("")
       : `<div class="empty"><div class="big">🔎</div><p>No ${f === "all" ? "" : "matching "}plans for ${esc(d)}.</p></div>`}`);
   document.querySelectorAll(".filters .chip").forEach((b) => (b.onclick = () => { state.stack[state.stack.length - 1].args = { d, f: b.dataset.f }; SCREENS.dest({ d, f: b.dataset.f }); }));
   document.querySelectorAll(".plan").forEach((b) => (b.onclick = () => planSheet(all.find((p) => p.planId === b.dataset.id))));
@@ -140,16 +158,16 @@ SCREENS.dest = async ({ d, f = "all" }) => {
 
 function planSheet(p) {
   if (!p) return;
-  openSheet(`<h3>${esc(planTitle(p))} · ${p.validityDays} day${p.validityDays > 1 ? "s" : ""}</h3><div class="muted small">${esc(p.name)}</div>
+  openSheet(`<div class="label">${esc(p.destination)}</div><h3>${esc(planTitle(p))} · ${p.validityDays} day${p.validityDays > 1 ? "s" : ""}</h3><div class="sprice">${esc(p.price)}</div>
     <div class="card" style="margin-top:12px"><div class="kv"><span>Destination</span><span>${esc(p.destination)}</span></div>
     <div class="kv"><span>Data</span><span>${esc(p.unlimitedData ? "Unlimited" : p.data)}</span></div>
     <div class="kv"><span>Valid for</span><span>${p.validityDays} day${p.validityDays > 1 ? "s" : ""}</span></div>
     ${netTag(p) ? `<div class="kv"><span>Networks</span><span>${esc(netTag(p))}</span></div>` : ""}
     <div class="kv"><span>Calls & texts</span><span>${p.callsAndTexts ? "Included" : "Data only"}</span></div>
-    <div class="kv"><span>Price</span><span style="color:var(--red);font-size:18px">${esc(p.price)}</span></div></div>
-    <div class="note">✅ Delivered in minutes to this app and your email.<br>📶 Install on Wi-Fi before you travel. Turn it on when you land.<br>📱 Your phone must support eSIM and be unlocked.</div>
+    </div>
+    <ul class="feats"><li>Delivered in minutes to this app and your email</li><li>Install on Wi-Fi before you travel, turn on when you land</li><li>Your phone must support eSIM and be unlocked</li></ul>
     <button class="btn red" id="buyBtn">Buy now · ${esc(p.price)}</button>
-    <div class="center small muted" style="margin-top:10px">Pay with GCash, Maya or card through PayMongo.</div>`);
+    <div class="pay"><span class="flabel">We accept</span><ul><li>GCash</li><li>Maya</li><li>Cards</li></ul></div>`);
   $("buyBtn").onclick = () => buy(p);
 }
 
@@ -347,8 +365,9 @@ STATE_LABEL.delivered = "Delivered";
 (async function start() {
   try { const v = (await Preferences.get({ key: "session" })).value; if (v) { const s = JSON.parse(v); state.token = s.token; state.user = s.user; } } catch { /* first run */ }
   if (NATIVE) {
-    StatusBar.setStyle({ style: Style.Dark }).catch(() => {});
-    StatusBar.setBackgroundColor({ color: "#13246e" }).catch(() => {});
+    const dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+    StatusBar.setStyle({ style: dark ? Style.Dark : Style.Light }).catch(() => {});
+    StatusBar.setBackgroundColor({ color: dark ? "#0b0e1e" : "#ffffff" }).catch(() => {});
     App.addListener("backButton", () => { if (!back()) { if (state.tab !== "shop") tab("shop"); else App.exitApp(); } });
     App.addListener("resume", () => { if (state.tab === "esims" && state.stack.length <= 1) SCREENS.esims(); });
     Browser.addListener("browserFinished", () => { if (state.tab === "esims") SCREENS.esims(); });
