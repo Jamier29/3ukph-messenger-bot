@@ -226,10 +226,11 @@
     <section class="card">
       <span class="step">Brief &amp; customers</span>
       <h2>Morning brief and customer list</h2>
-      <p class="help">The morning brief arrives every day at 7:00 AM (Manila) by phone push and email: yesterday's sales and profit, this month so far, and what needs you. The customer list collects every buyer email we know. People marked "unsubscribed" must be left out of promotions.</p>
+      <p class="help">The morning brief arrives every day at 7:00 AM (Manila) by phone push and email: yesterday's sales and profit, this month so far, and what needs you. Every Monday the weekly report also shows which source (Meta ad, partner, organic chat) brought new chats and sales, plus the top destinations. The customer list collects every buyer email we know. People marked "unsubscribed" must be left out of promotions.</p>
       <div class="row" style="margin-bottom:10px">
         <button class="ghost" id="brPreview">Preview today's brief</button>
         <button class="ghost" id="brSend">Send brief now</button>
+        <button class="ghost" id="wkPreview">📈 Weekly report</button>
         <button class="ghost" id="cuLoad">Show customers</button>
         <button class="ghost" id="cuCsv">⬇ Customers CSV</button>
       </div>
@@ -655,6 +656,10 @@
   $("brPreview").onclick = function () {
     $("brOut").textContent = "Loading…";
     api("/admin/api/brief").then(function (d) { $("brOut").textContent = d.text; }).catch(function (e) { $("brOut").textContent = e.message; });
+  };
+  $("wkPreview").onclick = function () {
+    $("brOut").textContent = "Loading…";
+    api("/admin/api/weekly").then(function (d) { $("brOut").textContent = d.text; }).catch(function (e) { $("brOut").textContent = e.message; });
   };
   $("brSend").onclick = function () {
     $("brStatus").className = "status"; $("brStatus").textContent = "Sending…";

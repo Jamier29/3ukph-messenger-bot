@@ -1244,7 +1244,7 @@ app.use("/app", express.static(path.join(__dirname, "public", "app"), { maxAge: 
 app.get("/sw.js", (req, res) => { res.set("Cache-Control", "no-cache"); res.set("Service-Worker-Allowed", "/"); res.type("application/javascript").sendFile(path.join(__dirname, "public", "app", "sw.js")); });
 app.get("/favicon.png", (req, res) => res.sendFile(path.join(__dirname, "public", "favicon.png")));
 // Morning brief (7 AM Manila), sales log and customer list. See brief.js.
-brief.init({ redis: (c) => redis(c), hasDb: () => hasDb(), mailer, partners, notifyAdmin: (x) => notifyAdmin(x),
+brief.init({ redis: (c) => redis(c), hasDb: () => hasDb(), mailer, partners, notifyAdmin: (x) => notifyAdmin(x), getReferral: (p) => capi.getReferral(p),
   pendingOrders: () => pendingOrdersList(),
   pendingApplicants: async () => {
     if (!hasDb()) return 0;
@@ -1767,7 +1767,7 @@ async function deliverEsim(psid, planId, opts = {}) {
     {
       const member = await reseller.getMember(psid).catch(() => null);
       const paid = opts.paidPHP || (order && order.planId === plan.planId ? Number(order.pricePHP) || Number(String(order.price || "").replace(/[^0-9.]/g, "")) || 0 : 0) || (member ? 0 : plan.pricePHP);
-      brief.recordSale({ psid, name: await getCustomerName(psid).catch(() => ""), email: emailTo, plan: plan.name, paidPHP: paid,
+      brief.recordSale({ psid, name: await getCustomerName(psid).catch(() => ""), email: emailTo, plan: plan.name, destination: plan.destination, paidPHP: paid,
         costPHP: costUSD ? costUSD * getRate() : 0, method: opts.method || (order && order.method) || (opts.auto ? "PayMongo" : "console"),
         reseller: !!member, channel: isWa(psid) ? "WhatsApp" : String(psid).startsWith("web_") ? "Website/App" : "Messenger", iccid: sim.iccid });
     }
@@ -3105,6 +3105,7 @@ async function handleMessagingEvent(event) {
 // Chat-tripper guard: customers who ordered before and resellers are never limited.
 async function guardAllows(senderId, text) {
   await partners.noteText(senderId, text).catch(() => {});
+  brief.noteLead(senderId).catch(() => {});
   let exempt = false;
   try {
     const rec = await getCustomerRecord(senderId);
