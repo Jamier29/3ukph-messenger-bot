@@ -76,6 +76,7 @@ const esims = require("./esimcard");
 const mailer = require("./mailer");
 const appApi = require("./appApi");
 const brief = require("./brief");
+const reminders = require("./reminders");
 
 const app = express();
 // Admin image uploads (QR codes) are bigger than normal requests.
@@ -1264,6 +1265,9 @@ brief.init({ redis: (c) => redis(c), hasDb: () => hasDb(), mailer, partners, not
   } });
 brief.install(app, requireAdmin);
 brief.startScheduler();
+reminders.init({ redis: (c) => redis(c), hasDb: () => hasDb(), mailer, esims, notifyAdmin: (x) => notifyAdmin(x), salesRows: () => brief.salesRows(), unsubLink: (e) => brief.unsubLink(e) });
+reminders.install(app, requireAdmin, express);
+reminders.startScheduler();
 
 // 3UK mobile app: accounts (email + code), checkout, My eSIMs. See appApi.js.
 appApi.install(app, { redis: (c) => redis(c), hasDb: () => hasDb(), mailer, esims, pm, getPlan, getRawPlan, reseller, publicUrl: PUBLIC_URL,

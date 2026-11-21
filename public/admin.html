@@ -234,6 +234,11 @@
         <button class="ghost" id="cuLoad">Show customers</button>
         <button class="ghost" id="cuCsv">⬇ Customers CSV</button>
       </div>
+      <div class="row" style="margin-bottom:10px">
+        <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="remOn"> Send "Running low on data?" emails (daily, 10 AM)</label>
+        <button class="ghost" id="remDry">Who would get it now?</button>
+        <a class="ghost" id="remPrev" href="#" style="text-decoration:none">See the email</a>
+      </div>
       <div class="status" id="brStatus"></div>
       <div id="brOut" class="help scrollbox" style="white-space:pre-wrap"></div>
     </section>
@@ -657,6 +662,24 @@
     $("brOut").textContent = "Loading…";
     api("/admin/api/brief").then(function (d) { $("brOut").textContent = d.text; }).catch(function (e) { $("brOut").textContent = e.message; });
   };
+  function loadRem() { api("/admin/api/reminders").then(function (d) { $("remOn").checked = !!d.on; }).catch(function () {}); }
+  $("remOn").onchange = function () {
+    api("/admin/api/reminders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ on: $("remOn").checked }) })
+      .then(function (d) { $("brStatus").className = "status ok"; $("brStatus").textContent = d.on ? "✓ Data reminders are ON (daily at 10 AM)." : "Data reminders are OFF."; })
+      .catch(function (e) { $("brStatus").className = "status err"; $("brStatus").textContent = e.message; });
+  };
+  $("remDry").onclick = function () {
+    $("brOut").textContent = "Checking eSIMs (sends nothing)…";
+    api("/admin/api/reminders?dry=1").then(function (d) {
+      $("brOut").textContent = "Checked " + d.checked + " eSIM(s). Would email " + d.due.length + ":\n" + d.due.map(function (x) { return "- " + x.email + " · " + x.plan + " (" + x.why + (x.remaining ? ", " + x.remaining + " left" : "") + ")"; }).join("\n");
+    }).catch(function (e) { $("brOut").textContent = e.message; });
+  };
+  $("remPrev").onclick = function (e) {
+    e.preventDefault();
+    fetch("/admin/api/reminders?preview=1", { headers: { "x-admin-key": key } }).then(function (r) { return r.text(); })
+      .then(function (h) { var w = window.open("", "_blank"); if (w) { w.document.write(h); w.document.close(); } else { $("brOut").innerHTML = h; } });
+  };
+  loadRem();
   $("wkPreview").onclick = function () {
     $("brOut").textContent = "Loading…";
     api("/admin/api/weekly").then(function (d) { $("brOut").textContent = d.text; }).catch(function (e) { $("brOut").textContent = e.message; });

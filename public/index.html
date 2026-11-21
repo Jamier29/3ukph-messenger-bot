@@ -1202,6 +1202,8 @@ fetch('/api/regions').then(function(r){return r.json();}).then(function(d){
   if(changed){buildChecker();if(curRoute>=0)renderDock(tier);}
 }).catch(function(){});
 
+// Deep link from emails/app: 3ukph.com/?dest=Japan opens the plan finder on that destination.
+try{var dl=new URLSearchParams(location.search).get('dest');if(dl&&/^[A-Za-z .&'-]{2,40}$/.test(dl)){cur=dl.trim();setTimeout(function(){var f=document.getElementById('ff');if(f&&f.scrollIntoView)f.scrollIntoView({block:'start'});},400);}}catch(e){}
 renderFinder();
 })();
 </script>

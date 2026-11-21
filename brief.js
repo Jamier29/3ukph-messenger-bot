@@ -300,4 +300,4 @@ function install(app, requireAdmin) {
   });
 }
 
-module.exports = { init, install, recordSale, noteLead, buildWeekly, weeklyText, sendWeekly, sendBrief, buildBrief, briefText, startScheduler, listCustomers, unsubLink, manilaDate };
+module.exports = { salesRows, init, install, recordSale, noteLead, buildWeekly, weeklyText, sendWeekly, sendBrief, buildBrief, briefText, startScheduler, listCustomers, unsubLink, manilaDate };
