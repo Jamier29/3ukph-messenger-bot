@@ -177,7 +177,12 @@ async function ensureGetStarted() {
     const base = `https://graph.facebook.com/v21.0/me/messenger_profile?access_token=${encodeURIComponent(PAGE_ACCESS_TOKEN)}`;
     const r = await fetch(base + "&fields=get_started,greeting");
     const d = await r.json().catch(() => ({}));
-    if (!r.ok) { getStartedStatus = "check failed: " + ((d.error && d.error.message) || r.status); return; }
+    if (!r.ok) {
+      const msg = (d.error && d.error.message) || String(r.status);
+      // The bot's system user has partial Page access, which can't read/change the Messenger profile. Harmless.
+      getStartedStatus = /administrative permission|#200|permission/i.test(msg) ? "not managed by the bot (needs full Page control; optional)" : "check failed: " + msg;
+      return;
+    }
     const cur = (d.data || [])[0] || {};
     if (cur.get_started) { getStartedStatus = "on"; return; }
     const body = { get_started: { payload: "GET_STARTED" } };
