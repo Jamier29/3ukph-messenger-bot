@@ -1,0 +1,17 @@
+{
+  "_readme": "Tours shown on 3ukph.com/tours. While live is false, the public page shows 'coming soon' with a general inquiry form; the tour cards show only at /tours?preview=1. Replace the sample tours with TripHappy's real Top 5 Local and Top 5 International, then set live to true. price: number in pesos, or null for 'Price on request'. image: optional https URL.",
+  "live": false,
+  "partner": "TripHappy.ph",
+  "tours": [
+    { "id": "oslob-tumalog", "type": "Local", "rank": 1, "name": "Oslob Whale Shark Watching and Tumalog Falls", "destination": "Oslob, Cebu", "duration": "Day tour", "price": null, "blurb": "Swim near gentle whale sharks in the morning, then cool off at the curtain-like Tumalog Falls.", "image": "", "sample": true },
+    { "id": "moalboal-kawasan", "type": "Local", "rank": 2, "name": "Kawasan Falls Canyoneering and Moalboal Sardine Run", "destination": "Badian and Moalboal, Cebu", "duration": "Day tour", "price": null, "blurb": "Jump, slide and swim down turquoise canyons, then snorkel with a million sardines and sea turtles.", "image": "", "sample": true },
+    { "id": "bohol-countryside", "type": "Local", "rank": 3, "name": "Bohol Countryside Day Tour", "destination": "Bohol", "duration": "Day tour", "price": null, "blurb": "Chocolate Hills, the tarsiers, the Loboc River cruise and old stone churches in one easy day.", "image": "", "sample": true },
+    { "id": "cebu-city", "type": "Local", "rank": 4, "name": "Cebu City Heritage and Highlands Tour", "destination": "Cebu City", "duration": "Half or full day", "price": null, "blurb": "Magellan's Cross, Basilica del Santo Niño, Temple of Leah and the city lights from Tops.", "image": "", "sample": true },
+    { "id": "bantayan", "type": "Local", "rank": 5, "name": "Bantayan Island Getaway", "destination": "Bantayan Island, Cebu", "duration": "2 to 3 days", "price": null, "blurb": "White sand, calm water and slow island days in the north of Cebu.", "image": "", "sample": true },
+    { "id": "japan", "type": "International", "rank": 1, "name": "Japan: Tokyo, Kyoto and Osaka", "destination": "Japan", "duration": "5 to 7 days", "price": null, "blurb": "Shrines, food streets and the bullet train. Visa help and itinerary planned with you.", "image": "", "sample": true },
+    { "id": "korea", "type": "International", "rank": 2, "name": "South Korea: Seoul and Nami Island", "destination": "South Korea", "duration": "4 to 6 days", "price": null, "blurb": "Palaces, K-culture, cafés and seasonal views on Nami Island.", "image": "", "sample": true },
+    { "id": "vietnam", "type": "International", "rank": 3, "name": "Vietnam: Da Nang, Hoi An and Ba Na Hills", "destination": "Vietnam", "duration": "4 to 5 days", "price": null, "blurb": "Golden Bridge, lantern-lit Hoi An and beaches, short and easy from Manila or Cebu.", "image": "", "sample": true },
+    { "id": "thailand", "type": "International", "rank": 4, "name": "Thailand: Bangkok and Pattaya", "destination": "Thailand", "duration": "4 to 5 days", "price": null, "blurb": "Temples, floating markets, street food and island hopping off Pattaya.", "image": "", "sample": true },
+    { "id": "singapore", "type": "International", "rank": 5, "name": "Singapore City Escape", "destination": "Singapore", "duration": "3 to 4 days", "price": null, "blurb": "Gardens by the Bay, Sentosa and hawker food, perfect for families.", "image": "", "sample": true }
+  ]
+}

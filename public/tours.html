@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tours – 3UK Philippines</title>
+<meta name="description" content="Book local and international tours through 3UK Philippines with our partner travel agency TripHappy.ph. Pick a tour, leave your details, and a travel agent will plan the itinerary and date with you.">
+<meta name="robots" content="noindex" id="robots">
+<meta property="og:title" content="Tours with 3UK Philippines and TripHappy.ph">
+<meta property="og:description" content="Top local and international tours. Pick one and a travel agent will plan it with you.">
+<meta property="og:image" content="https://3ukph.com/logo.png">
+<meta name="theme-color" content="#00166a">
+<link rel="icon" href="/favicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --brand-navy:#00166a;--brand-blue:#012ca5;--on-brand-blue:#fff;--brand-red:#cf0507;--on-brand-red:#fff;
+  --brand-gold:#c48205;--gold-light:#f8c830;--surface:#fff;--surface-raised:#f3f5fb;--ink:#0b1233;--ink-muted:#4a5170;
+  --border:#8a91ad;--hairline:#e3e6f0;--success:#0e7a3e;--danger:#b3261e;--shadow-card:0 4px 16px rgba(0,22,106,.10);
+  --radius-sm:6px;--radius-md:12px;--radius-lg:20px;--radius-pill:999px;--font-sans:Montserrat,"Segoe UI",system-ui,sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root{--brand-navy:#24399a;--brand-blue:#7b9bff;--on-brand-blue:#0b0e1e;--brand-red:#ff5a5c;--on-brand-red:#0b0e1e;
+  --brand-gold:#e0a21c;--surface:#0b0e1e;--surface-raised:#161b36;--ink:#f3f5fb;--ink-muted:#a9b0cc;--border:#5a628a;
+  --hairline:#252b4a;--success:#3fcb7a;--danger:#ff8a80;--shadow-card:0 4px 16px rgba(0,0,0,.45);}
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;font:400 16px/24px var(--font-sans);color:var(--ink);background:var(--surface);overflow-x:hidden}
+a{color:var(--brand-blue)}
+.wrap{max-width:1120px;margin:0 auto;padding:0 16px}
+h1,h2,h3{margin:0}
+.label{font:700 12px/16px var(--font-sans);letter-spacing:.08em;text-transform:uppercase;color:var(--brand-red)}
+.lead{color:var(--ink-muted);max-width:640px;margin:0}
+.uk-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;font:600 16px/24px var(--font-sans);text-decoration:none;cursor:pointer;border:2px solid transparent;border-radius:var(--radius-md);padding:12px 24px;transition:filter .15s}
+.uk-btn:hover{filter:brightness(1.12)}
+.uk-btn:focus-visible,.uk-chip:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--brand-blue);outline-offset:2px}
+.uk-btn-primary{background:var(--brand-blue);color:var(--on-brand-blue)}
+.uk-btn-accent{background:var(--brand-red);color:var(--on-brand-red)}
+.uk-btn-secondary{background:transparent;color:var(--brand-blue);border-color:var(--brand-blue)}
+.uk-btn[disabled]{opacity:.6;cursor:wait}
+.uk-chip{display:inline-flex;align-items:center;font:600 14px/20px var(--font-sans);cursor:pointer;padding:8px 16px;border-radius:var(--radius-pill);border:1px solid var(--border);background:var(--surface);color:var(--ink)}
+.uk-chip[aria-pressed="true"]{background:var(--brand-blue);border-color:var(--brand-blue);color:var(--on-brand-blue)}
+
+header{position:sticky;top:0;z-index:20;background:var(--surface);border-bottom:1px solid var(--hairline)}
+.bar{display:flex;align-items:center;justify-content:space-between;height:68px;gap:16px}
+.brand{display:flex;align-items:center;gap:12px;text-decoration:none;color:var(--ink);font:800 18px/1 var(--font-sans)}
+.brand img{width:44px;height:44px;border-radius:50%;background:#fff}
+@media(max-width:420px){.brand span{display:none}}
+
+.preview{background:var(--gold-light);color:#00166a;font:600 14px/20px var(--font-sans);text-align:center;padding:8px 16px}
+
+.hero{background:linear-gradient(160deg,var(--brand-navy),#012ca5 70%);color:#fff;padding:48px 0 56px}
+.hero .label{color:var(--gold-light)}
+.hero h1{font:800 clamp(32px,5.6vw,52px)/1.08 var(--font-sans);margin:8px 0 16px;letter-spacing:-.01em}
+.hero p{color:#dfe4f5;max-width:620px;margin:0 0 24px;font-size:18px;line-height:28px}
+.partner{display:inline-flex;align-items:center;gap:8px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);border-radius:var(--radius-pill);padding:6px 14px;font:600 14px/20px var(--font-sans)}
+.steps{display:grid;gap:12px;margin-top:32px;list-style:none;padding:0;counter-reset:s}
+@media(min-width:760px){.steps{grid-template-columns:repeat(3,1fr)}}
+.steps li{counter-increment:s;background:rgba(255,255,255,.08);border-radius:var(--radius-md);padding:14px 16px 14px 56px;position:relative;font-size:15px;line-height:22px}
+.steps li::before{content:counter(s);position:absolute;left:16px;top:14px;width:28px;height:28px;border-radius:50%;background:var(--gold-light);color:#00166a;font:800 15px/28px var(--font-sans);text-align:center}
+
+section{padding:48px 0}
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin:20px 0 24px}
+.grid{display:grid;gap:16px}
+@media(min-width:640px){.grid{grid-template-columns:repeat(2,1fr)}}
+@media(min-width:980px){.grid{grid-template-columns:repeat(3,1fr)}}
+.card{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--hairline);border-radius:var(--radius-md);box-shadow:var(--shadow-card);overflow:hidden}
+.pic{position:relative;aspect-ratio:16/9;background:linear-gradient(135deg,#012ca5,#00166a);display:flex;align-items:center;justify-content:center}
+.pic img{width:100%;height:100%;object-fit:cover}
+.pic svg{width:64px;height:64px;opacity:.9}
+.pic .rank{position:absolute;top:12px;left:12px;background:var(--gold-light);color:#00166a;font:800 12px/16px var(--font-sans);letter-spacing:.06em;text-transform:uppercase;padding:4px 10px;border-radius:var(--radius-sm)}
+.pic .kind{position:absolute;top:12px;right:12px;background:rgba(0,0,0,.45);color:#fff;font:700 12px/16px var(--font-sans);padding:4px 10px;border-radius:var(--radius-pill)}
+.body{display:flex;flex-direction:column;gap:6px;padding:16px 18px 18px;flex:1}
+.body h3{font:700 18px/24px var(--font-sans)}
+.meta{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:13px;line-height:18px;color:var(--ink-muted)}
+.blurb{font-size:14px;line-height:21px;color:var(--ink-muted);margin:4px 0 12px;flex:1}
+.price{font:800 20px/24px var(--font-sans);color:var(--ink)}
+.price small{font:600 12px/16px var(--font-sans);color:var(--ink-muted);display:block}
+.row{display:flex;align-items:flex-end;justify-content:space-between;gap:12px}
+.sample{font:700 11px/14px var(--font-sans);text-transform:uppercase;letter-spacing:.06em;color:var(--brand-gold)}
+
+.soon{background:var(--surface-raised);border-radius:var(--radius-lg);padding:28px;text-align:center}
+.soon h2{font:700 24px/30px var(--font-sans);margin-bottom:8px}
+.soon p{color:var(--ink-muted);margin:0 auto 20px;max-width:520px}
+
+/* form sheet */
+.bg{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:40}
+.sheet{position:fixed;z-index:41;left:0;right:0;bottom:0;max-height:92vh;overflow:auto;background:var(--surface);border-radius:var(--radius-lg) var(--radius-lg) 0 0;padding:20px 16px 28px;box-shadow:0 -8px 30px rgba(0,0,0,.25)}
+@media(min-width:700px){.sheet{left:50%;right:auto;bottom:auto;top:50%;transform:translate(-50%,-50%);width:560px;border-radius:var(--radius-lg)}}
+.hidden{display:none!important}
+.sheet h2{font:700 22px/28px var(--font-sans);margin:0 40px 4px 0}
+.sheet .x{position:absolute;top:14px;right:14px;width:36px;height:36px;border-radius:50%;border:0;background:var(--surface-raised);color:var(--ink);font-size:22px;cursor:pointer}
+.sub{color:var(--ink-muted);font-size:14px;line-height:20px;margin:0 0 16px}
+form{display:grid;gap:14px}
+.two{display:grid;gap:14px;grid-template-columns:1fr 1fr}
+@media(max-width:560px){.two:not(.keep){grid-template-columns:1fr}}
+label.f{display:grid;gap:6px;font:600 14px/20px var(--font-sans)}
+label.f span.opt{font-weight:400;color:var(--ink-muted)}
+input,select,textarea{font:400 16px/22px var(--font-sans);color:var(--ink);background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;width:100%}
+textarea{min-height:84px;resize:vertical}
+.check{display:flex;gap:10px;align-items:flex-start;font-size:14px;line-height:20px;color:var(--ink-muted)}
+.check input{width:20px;height:20px;margin-top:1px;flex:none}
+.err{color:var(--danger);font:600 14px/20px var(--font-sans)}
+.hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+.done{text-align:center;padding:12px 0}
+.done .tick{width:64px;height:64px;border-radius:50%;background:var(--success);color:#fff;font:800 34px/64px var(--font-sans);margin:0 auto 14px}
+.done .ref{display:inline-block;font:800 20px/28px var(--font-sans);background:var(--surface-raised);border-radius:var(--radius-sm);padding:6px 14px;margin:8px 0 14px;letter-spacing:.04em}
+
+.esim{background:var(--surface-raised)}
+.esim .in{display:grid;gap:16px;align-items:center}
+@media(min-width:800px){.esim .in{grid-template-columns:1.4fr auto}}
+.esim h2{font:700 24px/30px var(--font-sans);margin:6px 0 8px}
+
+footer{background:#00166a;color:#dfe4f5;padding:32px 0;font-size:14px;line-height:22px}
+footer a{color:#fff}
+.foot{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px}
+</style>
+</head>
+<body>
+<div class="preview hidden" id="previewBar">Preview only: these are sample tours. The public page shows "coming soon" until the real TripHappy list is added.</div>
+<header>
+  <div class="wrap bar">
+    <a class="brand" href="/"><img src="/logo.png" alt=""><span>3UK Philippines</span></a>
+    <a class="uk-btn uk-btn-secondary" href="/">Travel eSIMs</a>
+  </div>
+</header>
+
+<div class="hero">
+  <div class="wrap">
+    <span class="label">3UK Tours</span>
+    <h1>Pick a tour. We'll plan it with you.</h1>
+    <p>Our top local and international tours, booked through our partner travel agency. Choose one, leave your details, and a travel agent will contact you to finalize the itinerary, date and price.</p>
+    <span class="partner">🤝 In partnership with <b id="partnerName">TripHappy.ph</b></span>
+    <ol class="steps">
+      <li>Choose a tour below</li>
+      <li>Leave your name, contact and preferred date</li>
+      <li>A TripHappy travel agent contacts you to finalize everything</li>
+    </ol>
+  </div>
+</div>
+
+<section>
+  <div class="wrap">
+    <div id="toursBlock" class="hidden">
+      <span class="label">Top tours</span>
+      <h2 style="font:700 28px/34px var(--font-sans);margin:8px 0 0">Where do you want to go?</h2>
+      <div class="tabs" role="group" aria-label="Tour type">
+        <button class="uk-chip" data-f="Local" aria-pressed="true">🇵🇭 Local</button>
+        <button class="uk-chip" data-f="International" aria-pressed="false">✈️ International</button>
+      </div>
+      <div class="grid" id="grid"></div>
+      <p class="lead" style="margin-top:24px">Don't see what you want? <a href="#" data-open="">Ask for another tour</a> and our partner will suggest one.</p>
+    </div>
+    <div id="soonBlock" class="soon hidden">
+      <span class="label">Coming soon</span>
+      <h2>Our tour list is almost ready</h2>
+      <p>Tell us where you'd like to go and when. A travel agent from our partner will contact you with options.</p>
+      <button class="uk-btn uk-btn-accent" data-open="">Ask about a tour</button>
+    </div>
+  </div>
+</section>
+
+<section class="esim">
+  <div class="wrap in">
+    <div>
+      <span class="label">Going abroad?</span>
+      <h2>Get online the moment you land</h2>
+      <p class="lead">Travel eSIMs for 200+ destinations, priced in pesos. Pay with GCash, Maya or card, delivered in minutes.</p>
+    </div>
+    <a class="uk-btn uk-btn-primary" href="/#finder">Find an eSIM</a>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap foot">
+    <span>© 2026 3UKPH ESIM INTL E-LOAD AND SIMCARDS TRADING · Taguig City</span>
+    <span><a href="mailto:admin@3ukph.com">admin@3ukph.com</a> · <a href="https://api.whatsapp.com/send?phone=639347069356">WhatsApp</a> · <a href="/privacy">Privacy</a></span>
+  </div>
+</footer>
+
+<div class="bg hidden" id="bg"></div>
+<div class="sheet hidden" id="sheet" role="dialog" aria-modal="true" aria-labelledby="fTitle">
+  <button class="x" id="close" aria-label="Close">×</button>
+  <div id="formWrap">
+    <h2 id="fTitle">Ask about this tour</h2>
+    <p class="sub" id="fSub">A travel agent will contact you to plan the details. No payment yet.</p>
+    <form id="form" novalidate>
+      <label class="f" id="tourPick">Tour
+        <select name="tourId" id="tourSel"></select>
+      </label>
+      <label class="f hidden" id="otherWrap">Where would you like to go? <input name="tourOther" maxlength="120" placeholder="e.g. Siargao, Japan in spring"></label>
+      <label class="f">Full name <input name="name" autocomplete="name" required maxlength="80"></label>
+      <div class="two">
+        <label class="f">Email <input name="email" type="email" autocomplete="email" required maxlength="120"></label>
+        <label class="f">Mobile / WhatsApp <span class="opt">(optional)</span><input name="mobile" type="tel" autocomplete="tel" maxlength="30" placeholder="+63 9xx xxx xxxx"></label>
+      </div>
+      <div class="two">
+        <label class="f">Preferred date <span class="opt">(optional)</span><input name="date" type="date" id="date"></label>
+        <div class="two keep">
+          <label class="f">Adults <input name="adults" type="number" min="1" max="50" value="2" inputmode="numeric"></label>
+          <label class="f">Kids <input name="kids" type="number" min="0" max="50" value="0" inputmode="numeric"></label>
+        </div>
+      </div>
+      <label class="check"><input type="checkbox" name="flexible"> My dates are flexible</label>
+      <label class="f">Anything else? <span class="opt">(optional)</span><textarea name="notes" maxlength="800" placeholder="Budget, hotel preference, special requests"></textarea></label>
+      <div class="hp" aria-hidden="true"><label>Website <input name="website" tabindex="-1" autocomplete="off"></label></div>
+      <label class="check"><input type="checkbox" name="consent" required> <span>I agree that 3UK Philippines shares my details with its partner travel agency <b class="pn">TripHappy.ph</b> so they can contact me about this tour. See our <a href="/privacy" target="_blank">Privacy Policy</a>.</span></label>
+      <div class="err hidden" id="err" role="alert"></div>
+      <button class="uk-btn uk-btn-accent" type="submit" id="send">Send my request</button>
+    </form>
+  </div>
+  <div class="done hidden" id="done">
+    <div class="tick">✓</div>
+    <h2 style="margin:0">Request sent!</h2>
+    <p class="sub" style="margin:8px 0 0">Your reference number:</p>
+    <div class="ref" id="refOut"></div>
+    <p class="sub">A travel agent from <b class="pn">TripHappy.ph</b> will contact you soon. We also sent a copy to your email.</p>
+    <button class="uk-btn uk-btn-primary" id="doneBtn">Done</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  var $=function(id){return document.getElementById(id)};
+  var tours=[],filter='Local',partner='TripHappy.ph',lastFocus=null;
+  var qs=new URLSearchParams(location.search);
+  var preview=qs.get('preview')==='1';
+  var src=(qs.get('src')||qs.get('utm_source')||qs.get('ref')||'').slice(0,60);
+  var esc=function(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})};
+  var icon={Local:'<svg viewBox="0 0 64 64" fill="none" stroke="#f8c830" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 46c6-4 10-4 16 0s10 4 16 0 10-4 16 0"/><path d="M8 54c6-4 10-4 16 0s10 4 16 0 10-4 16 0"/><path d="M30 40V14M30 14c-8 0-14 4-16 10 6-3 11-3 16 0M30 14c8 0 14 4 16 10-6-3-11-3-16 0"/></svg>',
+    International:'<svg viewBox="0 0 64 64" fill="none" stroke="#f8c830" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="32" cy="32" r="22"/><path d="M10 32h44M32 10c7 7 10 14 10 22s-3 15-10 22M32 10c-7 7-10 14-10 22s3 15 10 22"/></svg>'};
+  var peso=function(n){return '₱'+Number(n).toLocaleString('en-PH')};
+
+  function card(t){
+    return '<article class="card"><div class="pic">'+(t.image?'<img src="'+esc(t.image)+'" alt="" loading="lazy">':icon[t.type]||icon.Local)+
+      '<span class="rank">Top '+esc(t.rank)+'</span><span class="kind">'+esc(t.type)+'</span></div>'+
+      '<div class="body">'+(t.sample?'<span class="sample">Sample tour</span>':'')+'<h3>'+esc(t.name)+'</h3>'+
+      '<div class="meta"><span>📍 '+esc(t.destination)+'</span><span>🕒 '+esc(t.duration)+'</span></div>'+
+      '<p class="blurb">'+esc(t.blurb)+'</p><div class="row"><div class="price">'+(t.price!=null?'<small>From</small>'+peso(t.price):'<small>Price</small>On request')+'</div>'+
+      '<button class="uk-btn uk-btn-accent" data-open="'+esc(t.id)+'">Inquire</button></div></div></article>';
+  }
+  function render(){
+    var list=tours.filter(function(t){return t.type===filter}).sort(function(a,b){return a.rank-b.rank});
+    $('grid').innerHTML=list.map(card).join('')||'<p class="lead">No tours here yet.</p>';
+  }
+  function fillSelect(sel){
+    var o=tours.slice().sort(function(a,b){return (a.type>b.type?1:a.type<b.type?-1:a.rank-b.rank)}).map(function(t){
+      return '<option value="'+esc(t.id)+'"'+(t.id===sel?' selected':'')+'>'+esc(t.type)+' · '+esc(t.name)+'</option>'});
+    o.push('<option value=""'+(!sel?' selected':'')+'>Another tour / not sure yet</option>');
+    $('tourSel').innerHTML=o.join('');
+    $('tourPick').classList.toggle('hidden',!tours.length);
+    $('otherWrap').classList.toggle('hidden',!!sel&&tours.length>0);
+  }
+  function open(id){
+    lastFocus=document.activeElement;
+    var t=tours.filter(function(x){return x.id===id})[0];
+    $('fTitle').textContent=t?t.name:'Ask about a tour';
+    $('fSub').textContent=(t?t.destination+' · '+t.duration+'. ':'')+'A travel agent will contact you to plan the details. No payment yet.';
+    fillSelect(t?t.id:'');
+    $('formWrap').classList.remove('hidden');$('done').classList.add('hidden');$('err').classList.add('hidden');
+    $('bg').classList.remove('hidden');$('sheet').classList.remove('hidden');
+    setTimeout(function(){var n=$('form').elements.name;n&&n.focus()},50);
+  }
+  function close(){$('bg').classList.add('hidden');$('sheet').classList.add('hidden');if(lastFocus)lastFocus.focus()}
+
+  document.addEventListener('click',function(e){
+    var b=e.target.closest('[data-open]');if(b){e.preventDefault();open(b.getAttribute('data-open'));return}
+    var f=e.target.closest('[data-f]');if(f){filter=f.getAttribute('data-f');document.querySelectorAll('[data-f]').forEach(function(x){x.setAttribute('aria-pressed',x===f)});render()}
+  });
+  $('close').onclick=close;$('bg').onclick=close;$('doneBtn').onclick=close;
+  document.addEventListener('keydown',function(e){if(e.key==='Escape'&&!$('sheet').classList.contains('hidden'))close()});
+  $('tourSel').onchange=function(){$('otherWrap').classList.toggle('hidden',!!this.value)};
+  try{var d=new Date(Date.now()+86400000);$('date').min=d.toISOString().slice(0,10)}catch(e){}
+
+  $('form').onsubmit=function(e){
+    e.preventDefault();
+    var f=this.elements,err=$('err');
+    var body={tourId:f.tourId.value,tourOther:f.tourOther.value,name:f.name.value,email:f.email.value,mobile:f.mobile.value,date:f.date.value,
+      adults:f.adults.value,kids:f.kids.value,flexible:f.flexible.checked,notes:f.notes.value,consent:f.consent.checked,website:f.website.value,source:src};
+    var msg=!body.name.trim()?'Please enter your name.':!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(body.email.trim())?'Please enter a valid email address.':!body.consent?'Please tick the box so our partner can contact you.':'';
+    if(msg){err.textContent=msg;err.classList.remove('hidden');return}
+    err.classList.add('hidden');$('send').disabled=true;$('send').textContent='Sending…';
+    fetch('/api/tours/inquiry',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+      .then(function(r){return r.json().then(function(j){if(!r.ok)throw new Error(j.error||'Something went wrong.');return j})})
+      .then(function(j){$('refOut').textContent=j.ref;$('formWrap').classList.add('hidden');$('done').classList.remove('hidden');$('form').reset()})
+      .catch(function(x){err.textContent=x.message||'Something went wrong. Please message us on WhatsApp.';err.classList.remove('hidden')})
+      .then(function(){$('send').disabled=false;$('send').textContent='Send my request'});
+  };
+
+  fetch('/api/tours'+(preview?'?preview=1':'')).then(function(r){return r.json()}).then(function(j){
+    partner=j.partner||partner;$('partnerName').textContent=partner;document.querySelectorAll('.pn').forEach(function(x){x.textContent=partner});
+    tours=j.tours||[];
+    if(j.live){var r=$('robots');r&&r.parentNode.removeChild(r)}
+    if(j.preview)$('previewBar').classList.remove('hidden');
+    if(tours.length){$('toursBlock').classList.remove('hidden');render();var want=qs.get('tour');if(want&&tours.some(function(t){return t.id===want}))open(want)}
+    else $('soonBlock').classList.remove('hidden');
+  }).catch(function(){$('soonBlock').classList.remove('hidden')});
+})();
+</script>
+</body>
+</html>

@@ -1277,6 +1277,8 @@ reminders.startScheduler();
 // 3UK mobile app: accounts (email + code), checkout, My eSIMs. See appApi.js.
 appApi.install(app, { redis: (c) => redis(c), hasDb: () => hasDb(), mailer, esims, pm, getPlan, getRawPlan, reseller, publicUrl: PUBLIC_URL,
   pmSaveOrder: (id, o) => pmSaveOrder(id, o), pmGetOrder: (id) => pmGetOrder(id), notifyAdmin: (x) => notifyAdmin(x), express });
+// Tour referrals with TripHappy.ph: /tours page + inquiry form. See tours.js.
+require("./tours").install(app, { redis: (c) => redis(c), hasDb: () => hasDb(), mailer, notifyAdmin: (x) => notifyAdmin(x), requireAdmin, express, publicUrl: PUBLIC_URL });
 // Public plan-finder API used by the website (peso prices only, no cost data)
 app.get("/api/destinations", (req, res) => res.json(listAllDestinations()));
 app.get("/api/plans", (req, res) => {
