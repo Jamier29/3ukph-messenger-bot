@@ -634,10 +634,14 @@ const TOOLS = [
     description:
       "For approved resellers only: send a secure PayMongo payment link to top up their reseller wallet. The wallet is " +
       "credited AUTOMATICALLY when they pay (no screenshot needed). A payment processing fee is added on top and paid by the reseller. " +
-      "Use when a reseller wants to top up / load / add funds to their wallet. Ask the amount first if they didn't say it.",
+      "Use when a reseller wants to top up / load / add funds to their wallet. Ask the amount first if they didn't say it. " +
+      "If they want to pay the top-up by credit/debit card, set payWith \"card\" (card fee is higher, about 4.8%, shown to them); otherwise the link takes GCash, Maya, QR Ph and banks (3% fee).",
     input_schema: {
       type: "object",
-      properties: { amountPHP: { type: "number", description: "Amount to add to the wallet in PHP (before the fee), e.g. 5000." } },
+      properties: {
+        amountPHP: { type: "number", description: "Amount to add to the wallet in PHP (before the fee), e.g. 5000." },
+        payWith: { type: "string", enum: ["card", "other"], description: "\"card\" only if they want to pay by Visa/Mastercard. Default \"other\"." }
+      },
       required: ["amountPHP"]
     }
   },
@@ -1067,7 +1071,20 @@ async function runTool(name, input, senderId) {
       if (!pm.configured() || !PUBLIC_URL || !pmAllowedFor(senderId)) {
         return { error: "Online top-up is not available right now. Tell them to pay by GCash or bank transfer and send the screenshot; an admin will add it to the wallet." };
       }
-      const fee = Math.ceil(credit * TOPUP_FEE_PERCENT) / 100;
+      // Card top-ups: PayMongo's card fee (~4.8% incl. VAT + fixed) is more than our 3%, so the reseller pays the
+      // exact card fee (grossed up so we receive the full credit). Other top-ups exclude card and keep the 3% fee.
+      const byCard = input.payWith === "card";
+      if (byCard && !cardsOn()) return { error: "Card payments aren't available yet (coming soon). Offer the regular top-up link (GCash, Maya, QR Ph, banks) instead." };
+      let fee, topupTypes;
+      if (byCard) {
+        const pct = 0.0402 * 1.12, fixed = 13.39 * 1.12;
+        fee = Math.ceil((((credit + fixed) / (1 - pct)) - credit) * 100) / 100;
+        topupTypes = ["card"];
+      } else {
+        fee = Math.ceil(credit * TOPUP_FEE_PERCENT) / 100;
+        topupTypes = pm.methods().filter((t) => t !== "card");
+        if (!topupTypes.length) topupTypes = ["qrph"];
+      }
       const total = Math.round((credit + fee) * 100) / 100;
       const bonus = topupBonusFor(credit);
       const ref = "3UK-TOPUP-" + Date.now().toString(36).toUpperCase();
@@ -1075,7 +1092,7 @@ async function runTool(name, input, senderId) {
         const co = await pm.createCheckout({
           amountPHP: total, name: `Reseller wallet top-up ${formatPHP(credit)}`,
           description: `3UK Philippines reseller wallet top-up: ${formatPHP(credit)} + ${formatPHP(fee)} payment processing fee`,
-          reference: ref, successUrl: `${PUBLIC_URL}/paid`, cancelUrl: `${PUBLIC_URL}/chat`, metadata: { ref, psid: senderId, kind: "topup" }, types: pm.methods()
+          reference: ref, successUrl: `${PUBLIC_URL}/paid`, cancelUrl: `${PUBLIC_URL}/chat`, metadata: { ref, psid: senderId, kind: "topup" }, types: topupTypes
         });
         await pmSaveOrder(co.id, { kind: "topup", ref, psid: senderId, creditPHP: credit, feePHP: fee, bonusPHP: bonus, pricePHP: total,
           planName: "Wallet top-up", planLabel: `Wallet top-up ${formatPHP(credit)} (+${formatPHP(fee)} fee)`, amount: co.amount, createdAt: Date.now(), status: "pending" });
