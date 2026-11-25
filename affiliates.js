@@ -144,7 +144,9 @@ function install(app, { redis, hasDb, mailer, partners, requireAdmin, express, n
       R(["INCR", `aff:clicks:${code}:${manilaMonth()}`]).catch(() => {});
       R(["INCR", `aff:clicks:${code}:all`]).catch(() => {});
     }
-    res.redirect(302, `/?ref=${code}`);
+    // Optional destination: 3ukph.com/r/CODE?d=Japan opens the plan finder on Japan.
+    const d = String(req.query.d || "").trim();
+    res.redirect(302, `/?ref=${code}` + (/^[A-Za-z .&'-]{2,40}$/.test(d) ? `&dest=${encodeURIComponent(d)}` : ""));
   });
 
   app.post("/api/affiliate/signup", json, async (req, res) => {

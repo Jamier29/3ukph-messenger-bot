@@ -51,6 +51,11 @@ details{border-top:1px solid var(--hair);padding:12px 0}details summary{font-wei
 table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--hair)}th{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}td.n,th.n{text-align:right}
 .tblwrap{overflow-x:auto}
 footer{background:#00166a;color:#dfe4f5;padding:28px 0;font-size:14px}footer a{color:#fff}.foot{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px}
+.dchips{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}.dchip{font:600 14px/20px var(--font);padding:7px 14px;border-radius:999px;border:1px solid var(--border);background:var(--surface);color:var(--ink);cursor:pointer}
+.dchip[aria-pressed="true"]{background:var(--blue);border-color:var(--blue);color:var(--on-blue)}
+.plans{display:grid;gap:10px;margin-top:12px}.pl{display:grid;grid-template-columns:1fr auto;gap:8px 12px;align-items:center;background:var(--raised);border-radius:var(--r);padding:12px 14px}
+.pl b{font-size:15px}.pl .pr{font:800 18px/24px var(--font);color:var(--navy)}@media (prefers-color-scheme: dark){.pl .pr{color:var(--gold-l)}}.pl .acts{grid-column:1/-1;display:flex;gap:8px;flex-wrap:wrap}
+.cap{white-space:pre-wrap;background:var(--raised);border-radius:var(--r);padding:14px;font-size:14px;line-height:21px;margin-top:12px}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:var(--surface);padding:10px 18px;border-radius:999px;font:600 14px/20px var(--font);z-index:50}
 </style>
 </head>
@@ -188,6 +193,20 @@ footer{background:#00166a;color:#dfe4f5;padding:28px 0;font-size:14px}footer a{c
     </div>
   </div>
 
+  <div class="card" style="margin-top:28px" id="sharePlan">
+    <span class="label">Share a plan</span>
+    <h2 style="font-size:20px;margin-top:4px">Find an eSIM to post</h2>
+    <p class="sub">Pick a destination. You'll get a ready-to-post caption with real prices and your own link, which opens 3ukph.com on that destination. Prices update automatically, so re-copy before posting.</p>
+    <div class="row2" style="grid-template-columns:1fr auto">
+      <input id="destIn" list="destList" placeholder="Type a country or region, e.g. Japan, Europe" maxlength="40">
+      <button class="btn primary small" id="destGo">Show plans</button>
+    </div>
+    <datalist id="destList"></datalist>
+    <div class="dchips" id="dchips"></div>
+    <div id="destOut"></div>
+    <p class="sub" style="margin:14px 0 0">Want to browse everything? <a href="#" id="openSite" target="_blank" rel="noopener">Open 3ukph.com with your link</a></p>
+  </div>
+
   <div class="card" style="margin-top:28px">
     <h2 style="font-size:18px">Tips that sell</h2>
     <ul style="color:var(--muted);margin:8px 0 0;padding-left:20px">
@@ -231,7 +250,56 @@ footer{background:#00166a;color:#dfe4f5;padding:28px 0;font-size:14px}footer a{c
     $('recent').innerHTML=s.recent.length?s.recent.map(function(r){return '<tr><td>'+day(r.at)+'</td><td>'+esc((r.quantity>1?r.quantity+' × ':'')+r.plan)+'</td><td class="n">'+peso(r.amountPHP)+'</td><td class="n">'+peso(r.commissionPHP)+'</td></tr>'}).join(''):'<tr><td colspan="4" style="color:var(--muted)">No sales yet. Share your link to get started!</td></tr>';
     $('months').innerHTML=s.months.length?s.months.map(function(m){return '<tr><td>'+m.month+'</td><td class="n">'+m.orders+'</td><td class="n">'+peso(m.salesPHP)+'</td><td class="n">'+peso(m.commissionPHP)+'</td></tr>'}).join(''):'<tr><td colspan="4" style="color:var(--muted)">—</td></tr>';
     $('payouts').innerHTML=s.payouts.length?s.payouts.map(function(x){return '<tr><td>'+day(x.paidAt)+'</td><td>'+esc(x.to)+'</td><td class="n">'+peso(x.amountPHP)+'</td></tr>'}).join(''):'<tr><td colspan="3" style="color:var(--muted)">No payouts yet.</td></tr>';
+    initShare(p);
     var f=$('payForm').elements;f.payoutMethod.value=p.payoutMethod||'GCash';f.payoutNumber.value=p.payoutNumber?'+'+p.payoutNumber:'';f.payoutName.value=p.payoutName||'';
+  }
+
+  // ---- Share a plan ----
+  var ME=null,POP=['Japan','South Korea','Hong Kong','Taiwan','Thailand','Singapore','Vietnam','Europe','USA','Global'];
+  var FLAG={'Japan':'🇯🇵','South Korea':'🇰🇷','Hong Kong':'🇭🇰','Taiwan':'🇹🇼','Thailand':'🇹🇭','Singapore':'🇸🇬','Vietnam':'🇻🇳','Europe':'🇪🇺','USA':'🇺🇸','United States':'🇺🇸','Global':'🌍','Asia':'🌏','China':'🇨🇳','Australia':'🇦🇺','Canada':'🇨🇦','United Kingdom':'🇬🇧','Malaysia':'🇲🇾','Indonesia':'🇮🇩','United Arab Emirates':'🇦🇪','Saudi Arabia':'🇸🇦','Qatar':'🇶🇦','Italy':'🇮🇹','France':'🇫🇷','Spain':'🇪🇸','Germany':'🇩🇪','Switzerland':'🇨🇭','Turkey':'🇹🇷'};
+  function destLink(d){return 'https://3ukph.com/r/'+ME.code+'?d='+encodeURIComponent(d)}
+  function copy(t,msg){(navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(function(){toast(msg||'Copied!')}).catch(function(){prompt('Copy this:',t)})}
+  function share(t){if(navigator.share)navigator.share({text:t}).catch(function(){});else copy(t,'Copied! Paste it in your post.')}
+  function pickPlans(list){
+    var by=function(f){return list.filter(f).sort(function(a,b){return a.pricePHP-b.pricePHP})[0]};
+    var out=[],seen={},add=function(p){if(p&&!seen[p.planId]){seen[p.planId]=1;out.push(p)}};
+    add(by(function(p){return true}));
+    add(by(function(p){return parseFloat(p.data)>=3&&p.validityDays>=7&&p.validityDays<=10&&!p.unlimitedData}));
+    add(by(function(p){return parseFloat(p.data)>=5&&p.validityDays>=30&&!p.unlimitedData}));
+    add(by(function(p){return parseFloat(p.data)>=10&&p.validityDays>=30&&!p.unlimitedData}));
+    add(by(function(p){return parseFloat(p.data)>=20&&p.validityDays>=30&&!p.unlimitedData}));
+    add(by(function(p){return p.unlimitedData&&p.validityDays>=5&&p.validityDays<=7}));
+    add(by(function(p){return p.unlimitedData&&p.validityDays>=15}));
+    add(by(function(p){return p.callsAndTexts}));
+    return out.slice(0,8);
+  }
+  function line(p){return (p.unlimitedData?'UNLIMITED':p.data)+' / '+p.validityDays+' day'+(p.validityDays>1?'s':'')+(p.callsAndTexts?' + calls & texts':'')+': '+p.price}
+  function destCaption(d,ps){var f=FLAG[d]||'✈️',L=destLink(d);
+    return f+' Papuntang '+d+'? May data ka na agad pagdating! 📶\n\n'+ps.slice(0,5).map(function(p){return '• '+line(p)}).join('\n')+
+      '\n\n✅ Walang roaming charges, walang pila sa airport para sa SIM\n✅ I-install bago umalis, i-on pagdating\n✅ Bayad via GCash, Maya o bank, QR in minutes\n\n👉 Order dito: '+L+'\n(o i-type ang '+ME.code+' pag nag-message ka sa 3UK)'}
+  function planCaption(d,p){var f=FLAG[d]||'✈️';return f+' '+d+' eSIM: '+line(p)+'\n\nData agad pagdating, walang roaming! 📶 Order dito: '+destLink(d)+'\n(code: '+ME.code+')'}
+  function showDest(d){
+    d=String(d||'').trim();if(!d)return;$('destIn').value=d;
+    document.querySelectorAll('.dchip').forEach(function(c){c.setAttribute('aria-pressed',c.textContent.indexOf(d)>=0)});
+    $('destOut').innerHTML='<p class="sub">Loading plans…</p>';
+    fetch('/api/plans?destination='+encodeURIComponent(d)).then(function(r){return r.json()}).then(function(j){
+      if(!j.found||!j.plans||!j.plans.length){$('destOut').innerHTML='<p class="sub">No plans found for "'+esc(d)+'". Try the country name in English, or a region like Europe, Asia or Global.</p>';return}
+      var name=(j.matchedDestinations&&j.matchedDestinations[0])||d,ps=pickPlans(j.plans),cap=destCaption(name,ps);
+      $('destOut').innerHTML='<p class="sub" style="margin:8px 0 0"><b>'+esc(name)+'</b>: '+j.totalPlansForDestination+' plans. Popular picks:</p>'+
+        '<div class="plans">'+ps.map(function(p,i){return '<div class="pl"><div><b>'+esc(line(p).split(': ')[0])+'</b><br><small style="color:var(--muted)">'+esc(p.name)+'</small></div><div class="pr">'+esc(p.price)+'</div><div class="acts"><button class="btn ghost small" data-pc="'+i+'">Copy short post</button></div></div>'}).join('')+'</div>'+
+        '<h3 style="font-size:16px;margin-top:18px">Ready-to-post caption</h3><div class="cap" id="capTxt">'+esc(cap)+'</div>'+
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"><button class="btn accent small" id="capCopy">Copy caption</button><button class="btn ghost small" id="capShare">Share…</button><button class="btn ghost small" id="lnkCopy">Copy link only</button></div>';
+      $('destOut').querySelectorAll('[data-pc]').forEach(function(b){b.onclick=function(){copy(planCaption(name,ps[+b.getAttribute('data-pc')]))}});
+      $('capCopy').onclick=function(){copy(cap,'Caption copied! Paste it in your post.')};$('capShare').onclick=function(){share(cap)};$('lnkCopy').onclick=function(){copy(destLink(name))};
+    }).catch(function(){$('destOut').innerHTML='<p class="err">Couldn\'t load plans. Please try again.</p>'});
+  }
+  function initShare(p){
+    ME=p;$('openSite').href=p.links.website;
+    if(!$('dchips').children.length){$('dchips').innerHTML=POP.map(function(d){return '<button type="button" class="dchip" aria-pressed="false">'+(FLAG[d]||'')+' '+esc(d)+'</button>'}).join('');
+      $('dchips').querySelectorAll('.dchip').forEach(function(c,i){c.onclick=function(){showDest(POP[i])}});
+      fetch('/api/destinations').then(function(r){return r.json()}).then(function(l){$('destList').innerHTML=(l||[]).map(function(x){return '<option value="'+esc(x)+'">'}).join('')}).catch(function(){});}
+    $('destGo').onclick=function(){showDest($('destIn').value)};
+    $('destIn').onkeydown=function(e){if(e.key==='Enter'){e.preventDefault();showDest(this.value)}};
   }
   function loadDash(){return call('/api/affiliate/me').then(function(d){render(d);show('dash')}).catch(function(e){if(e.status===401){setToken(null);show('landing')}else toast(e.message)})}
 
