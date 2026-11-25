@@ -19,6 +19,14 @@ const crypto = require("crypto");
 const API = "https://api.paymongo.com/v1";
 const KEY = (process.env.PAYMONGO_SECRET_KEY || "").trim();
 
+// Cards only for orders of CARD_MIN_PHP and up (the fixed card fee eats the profit on small orders).
+// If card is the only method asked for, keep it (the bot already checked the minimum).
+function cardRule(list, amountPHP) {
+  const min = Number(process.env.CARD_MIN_PHP ?? 300);
+  if (Number(amountPHP) >= min || !list.includes("card") || list.length === 1) return list;
+  return list.filter((t) => t !== "card");
+}
+
 function configured() { return /^sk_(test|live)_/.test(KEY); }
 function isTest() { return KEY.startsWith("sk_test_"); }
 function methods() {
@@ -50,7 +58,7 @@ async function createCheckout({ amountPHP, name, description, reference, success
   if (!(amount >= 2000)) throw new Error("PayMongo: amount too small (minimum ₱20).");
   const attributes = {
     line_items: [{ currency: "PHP", amount, name: String(name).slice(0, 255), quantity: 1 }],
-    payment_method_types: types && types.length ? types : methods(),
+    payment_method_types: cardRule(types && types.length ? types : methods(), amountPHP),
     description: String(description || name).slice(0, 255),
     reference_number: reference,
     send_email_receipt: true,

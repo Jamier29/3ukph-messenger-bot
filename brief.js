@@ -33,7 +33,7 @@ async function recordSale(s) {
     const rec = {
       at: new Date().toISOString(), day: manilaDate(), psid: String(s.psid || ""), name: String(s.name || "").slice(0, 80),
       email: String(s.email || "").trim().toLowerCase().slice(0, 120), plan: String(s.plan || "").slice(0, 120),
-      paidPHP: Math.round(Number(s.paidPHP || 0) * 100) / 100, costPHP: Math.round(Number(s.costPHP || 0) * 100) / 100,
+      paidPHP: Math.round(Number(s.paidPHP || 0) * 100) / 100, costPHP: Math.round(Number(s.costPHP || 0) * 100) / 100, feePHP: Math.round(Number(s.feePHP || 0) * 100) / 100,
       method: String(s.method || "").slice(0, 40), reseller: !!s.reseller, channel: String(s.channel || "").slice(0, 20), iccid: String(s.iccid || ""),
       destination: String(s.destination || "").slice(0, 60), source: s.reseller ? "Reseller" : await sourceOf(s.psid, s.channel)
     };
@@ -49,11 +49,12 @@ function summarize(rows) {
   const paid = rows.reduce((s, r) => s + (r.paidPHP || 0), 0);
   const cost = rows.reduce((s, r) => s + (r.costPHP || 0), 0);
   const withPrice = rows.filter((r) => r.paidPHP > 0);
-  const profit = withPrice.reduce((s, r) => s + r.paidPHP - (r.costPHP || 0), 0);
+  const fees = rows.reduce((s, r) => s + (r.feePHP || 0), 0);
+  const profit = withPrice.reduce((s, r) => s + r.paidPHP - (r.costPHP || 0) - (r.feePHP || 0), 0); // after payment fees
   const plans = {};
   for (const r of rows) plans[r.plan] = (plans[r.plan] || 0) + 1;
   const top = Object.entries(plans).sort((a, b) => b[1] - a[1]).slice(0, 3);
-  return { count: rows.length, paid, cost, profit, unpriced: rows.length - withPrice.length, top, resellerCount: rows.filter((r) => r.reseller).length };
+  return { count: rows.length, paid, cost, fees, profit, unpriced: rows.length - withPrice.length, top, resellerCount: rows.filter((r) => r.reseller).length };
 }
 
 // ---------- lead sources (analytics loop) ----------
@@ -105,7 +106,7 @@ async function buildWeekly() {
   for (const r of rows) {
     const k = r.source || (r.reseller ? "Reseller" : "Organic " + (r.channel || "chat"));
     const b = bySource[k] || (bySource[k] = { source: k, sales: 0, revenue: 0, profit: 0, leads: 0 });
-    b.sales++; b.revenue += r.paidPHP || 0; b.profit += r.paidPHP > 0 ? r.paidPHP - (r.costPHP || 0) : 0;
+    b.sales++; b.revenue += r.paidPHP || 0; b.profit += r.paidPHP > 0 ? r.paidPHP - (r.costPHP || 0) - (r.feePHP || 0) : 0;
   }
   for (const [k, n] of Object.entries(leads)) (bySource[k] || (bySource[k] = { source: k, sales: 0, revenue: 0, profit: 0, leads: 0 })).leads = n;
   const sources = Object.values(bySource).sort((a, b) => b.revenue - a.revenue || b.leads - a.leads);
@@ -180,6 +181,7 @@ function briefText(b) {
   L.push(`Yesterday: ${b.y.count} eSIM(s) delivered · ${peso(b.y.paid)} sales · ${peso(b.y.profit)} profit`);
   if (b.y.top.length) L.push(`Top: ${b.y.top.map(([p, n]) => `${p} ×${n}`).join(", ")}`);
   L.push(`This month: ${b.m.count} eSIM(s) · ${peso(b.m.paid)} sales · ${peso(b.m.profit)} profit`);
+  if (b.m.fees > 0) L.push(`(Profit is after ${peso(b.m.fees)} PayMongo fees this month.)`);
   if (b.partnerLine) L.push(`Partners this month: ${b.partnerLine}`);
   if (b.appUsers) L.push(`New app accounts yesterday: ${b.appUsers}`);
   L.push(b.needs.length ? `Needs you:\n- ${b.needs.join("\n- ")}` : "Needs you: nothing. 🎉");
@@ -197,6 +199,7 @@ function briefHtml(b) {
 ${b.y.top.length ? `<p style="margin:10px 0 0;color:#4a5170">Top plans: ${b.y.top.map(([p, n]) => `${esc(p)} ×${n}`).join(", ")}</p>` : ""}
 <div style="font-weight:700;margin:18px 0 6px">This month</div>
 <table style="width:100%;border-spacing:6px 0"><tr>${tile("eSIMs", b.m.count)}${tile("Sales", peso(b.m.paid))}${tile("Profit", peso(b.m.profit))}</tr></table>
+${b.m.fees > 0 ? `<p style="margin:8px 0 0;font-size:12px;color:#4a5170">Profit is after ${peso(b.m.fees)} PayMongo fees this month.</p>` : ""}
 ${b.partnerLine ? `<p style="margin:10px 0 0;color:#4a5170">Partners: ${esc(b.partnerLine)}</p>` : ""}
 ${b.appUsers ? `<p style="margin:6px 0 0;color:#4a5170">New app accounts yesterday: <b>${b.appUsers}</b></p>` : ""}
 <div style="margin-top:18px;padding:12px 14px;border-radius:12px;background:${b.needs.length ? "#fff3cf" : "#e2f5ea"};border-left:4px solid ${b.needs.length ? "#f8c830" : "#0e7a3e"}">

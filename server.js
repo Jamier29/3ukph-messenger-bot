@@ -12,6 +12,7 @@ const fs = require("fs");
 const path = require("path");
 const express = require("express");
 const { BUSINESS_INFO } = require("./business-info");
+const payFees = require("./payFees");
 const { allPlans, searchMultiCountryPlans, findPlansByText, getRawPlan, searchPlans, getPlan, listAllDestinations, getRate, headlinePrices, regionSummaries, formatPHP } = require("./planSearch");
 const QRCode = require("qrcode");
 const { brandedQr } = require("./qrcard");
@@ -228,6 +229,9 @@ const PAYMENT_METHODS = {
 // they type in the amount we quote. Override with PAYPAL_LINK in Render.
 // PAYPAL_EXTRA_PERCENT (default 5) adds a % on top of the USD price to cover
 // PayPal's fees, e.g. 5 -> a $16.74 plan is quoted as $17.58.
+// PayPal is OFF by default (Nov 25, 2026: owner removed it; foreign cards go through PayMongo).
+// Set PAYPAL_ENABLED=on in Render to bring it back.
+const PAYPAL_ENABLED = /^(on|true|1|yes)$/i.test(String(process.env.PAYPAL_ENABLED || "").trim());
 const PAYPAL_LINK = (process.env.PAYPAL_LINK || "https://www.paypal.com/ncp/payment/GWWNPBXR353YJ").trim();
 const PAYPAL_EXTRA_PERCENT = (() => {
   const v = String(process.env.PAYPAL_EXTRA_PERCENT ?? "").trim();
@@ -276,10 +280,13 @@ function normalizePaymentMethod(input) {
   if (s.includes("wallet")) return "wallet";
   if (s.includes("qrph") || s === "qr" || s.includes("instapay")) return "qrph";
   if (s.includes("paypal")) return "paypal";
-  // Cards go through PayMongo once cards are enabled there, otherwise PayPal (which takes cards too).
-  if (s.includes("card") || s.includes("visa") || s.includes("mastercard")) return pm.configured() && pm.methods().includes("card") ? "card" : "paypal";
+  // Cards go through PayMongo (create_order explains if cards aren't switched on yet).
+  if (s.includes("card") || s.includes("visa") || s.includes("mastercard")) return "card";
   return null;
 }
+
+// Card payments are on once PayMongo activates them and "card" is in PAYMONGO_METHODS (Render).
+function cardsOn() { return pm.configured() && pm.methods().includes("card"); }
 
 // ---------------------------------------------------------------------
 // Tools the AI can call.
@@ -332,7 +339,7 @@ function priceFloorPHP(plan) {
   const cost = reseller.costOf(raw);
   if (!(cost > 0)) return Math.round(plan.pricePHP * 0.88 * 100) / 100; // unknown cost: max 12% off
   const costPHP = cost * getRate();
-  const fees = plan.pricePHP * 0.03;
+  const fees = payFees.worstFee(plan.pricePHP, cardsOn()); // real PayMongo fee incl. the fixed card fee
   const minProfit = Math.max(15, plan.pricePHP * 0.08);
   return Math.min(plan.pricePHP, Math.ceil((costPHP + fees + minProfit) * 100) / 100);
 }
@@ -598,14 +605,13 @@ const TOOLS = [
     description:
       "Place the order once you know: the exact plan (planId), how many eSIMs of it (quantity), the payment method, and the customer's email. " +
       "If they want several eSIMs of the same plan (family, barkada, group), use quantity in ONE order and tell them the total (price x quantity). " +
-      "This sends the customer the payment QR code for their chosen method (or the PayPal link and USD amount " +
-      "for PayPal) and alerts the admin.",
+      "This sends the customer a secure payment link or the payment QR code for their chosen method and alerts the admin.",
     input_schema: {
       type: "object",
       properties: {
         planId: { type: "string", description: "The planId of the EXACT plan the customer confirmed (the one whose price you quoted)." },
         confirmedPrice: { type: "string", description: "The exact peso price you last quoted the customer for this plan, from get_plan (e.g. '₱1,037.88', the discounted price if a code was accepted, or the resellerPrice for an approved reseller)." },
-        paymentMethod: { type: "string", enum: ["GCash", "Maya", "MariBank", "UnionBank", "BPI", "QR Ph", "Card", "PayPal", "Wallet"], description: "\"Wallet\" is only for approved Gold resellers paying from their prepaid reseller wallet. \"QR Ph\" = scan to pay with GCash, Maya or any bank app." },
+        paymentMethod: { type: "string", enum: ["GCash", "Maya", "MariBank", "UnionBank", "BPI", "QR Ph", "Card", "Wallet"], description: "\"Wallet\" is only for approved Gold resellers paying from their prepaid reseller wallet. \"QR Ph\" = scan to pay with GCash, Maya or any bank app. \"Card\" = Visa/Mastercard credit or debit card (local or foreign), only for orders of ₱" + payFees.CARD_MIN_PHP + " and up. We do NOT accept PayPal." },
         email: { type: "string", description: "Email address where the eSIM QR code should be sent." },
         quantity: { type: "integer", minimum: 1, maximum: 10, description: "How many eSIMs of this SAME plan (e.g. 3 for a family of 3). Default 1. confirmedPrice stays the price of ONE eSIM; the total is charged in one payment and each eSIM gets its own QR code. For different plans, place separate orders." },
         deliverVia: { type: "string", enum: ["Messenger", "Email", "Both"], description: "How the customer wants the eSIM QR code." },
@@ -721,7 +727,9 @@ async function runTool(name, input, senderId) {
       const basePlan = getPlan(input.planId);
       if (!basePlan) return { error: "No plan with that planId. Search again and confirm the plan with the customer." };
       const methodKey = normalizePaymentMethod(input.paymentMethod);
-      if (!methodKey) return { error: "Unknown payment method. Accepted: GCash, Maya, MariBank, UnionBank, BPI, PayPal." };
+      if (!methodKey) return { error: "Unknown payment method. Accepted: GCash, Maya, MariBank, UnionBank, BPI, QR Ph (any bank app)" + (cardsOn() ? ", Visa/Mastercard card" : "") + "." };
+      if (methodKey === "paypal" && !PAYPAL_ENABLED) return { error: "We no longer accept PayPal. Tell the customer kindly and offer GCash, Maya, QR Ph (scan with any bank app) or bank transfer" + (cardsOn() ? ", or a Visa/Mastercard credit/debit card (foreign cards work too)" : "; card payments are coming soon") + ". Do not create the order until they choose." };
+      if (methodKey === "card" && !cardsOn()) return { error: "Card payments aren't available yet (coming soon). Offer GCash, Maya, QR Ph (scan with any bank app) or bank transfer instead. Do not mention PayPal." };
       const email = String(input.email || "").trim();
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { error: "That email looks invalid. Ask the customer to re-type it." };
 
@@ -753,6 +761,14 @@ async function runTool(name, input, senderId) {
             "agreed to (call get_plan to check its price), then call create_order again with that planId and its exact price. " +
             "Do not tell the customer about this check unless the price they will pay changes."
         };
+      }
+
+      // Card minimum: the fixed card fee eats the profit on small orders (checked before any side effects).
+      if (methodKey === "card") {
+        const qtyEarly = Math.max(1, Math.min(10, parseInt(input.quantity, 10) || 1));
+        if (expected.pricePHP * qtyEarly < payFees.CARD_MIN_PHP) {
+          return { error: `Card payment is for orders of ${formatPHP(payFees.CARD_MIN_PHP)} and up. This order is ${formatPHP(expected.pricePHP * qtyEarly)}. Do NOT create it with Card: kindly offer GCash, Maya or QR Ph (scan with any bank app, or InstaPay from any bank), and create the order once they choose.` };
+        }
       }
 
       // Orderability check: never take payment for a plan our supplier can't issue automatically.
@@ -853,8 +869,8 @@ async function runTool(name, input, senderId) {
         }).catch((err) => console.error("[wallet] could not log order:", err.message));
       }
 
-      // PayPal (customers abroad): quote a USD amount and give the PayPal link.
-      if (methodKey === "paypal") {
+      // PayPal (only if PAYPAL_ENABLED): quote a USD amount and give the PayPal link.
+      if (methodKey === "paypal" && PAYPAL_ENABLED) {
         const usd = paypalUsdAmount(plan.pricePHP);
         const usdText = `USD ${usd.toFixed(2)}`;
         const ppQr = findQrFile("paypal");
@@ -939,7 +955,7 @@ async function runTool(name, input, senderId) {
           console.error("[paymongo] checkout failed, using QR images instead:", err.message);
           notifyAdmin({ title: "PayMongo link failed", message: `${err.message}\nUsed the manual QR instead.`, tags: "warning" }).catch(() => {});
           if (methodKey === "card" || methodKey === "qrph") {
-            return { error: "Online payment link is temporarily unavailable. Offer GCash, Maya or bank transfer (or PayPal for cards) instead." };
+            return { error: "Online payment link is temporarily unavailable. Offer GCash, Maya or bank transfer (scan our QR) instead." };
           }
         }
       }
@@ -1779,7 +1795,7 @@ async function deliverEsim(psid, planId, opts = {}) {
       const member = await reseller.getMember(psid).catch(() => null);
       const paid = opts.paidPHP || (order && order.planId === plan.planId ? Number(order.pricePHP) || Number(String(order.price || "").replace(/[^0-9.]/g, "")) || 0 : 0) || (member ? 0 : plan.pricePHP);
       brief.recordSale({ psid, name: await getCustomerName(psid).catch(() => ""), email: emailTo, plan: plan.name, destination: plan.destination, paidPHP: paid,
-        costPHP: costUSD ? costUSD * getRate() : 0, method: opts.method || (order && order.method) || (opts.auto ? "PayMongo" : "console"),
+        costPHP: costUSD ? costUSD * getRate() : 0, feePHP: Number(opts.feePHP) || 0, method: opts.method || (order && order.method) || (opts.auto ? "PayMongo" : "console"),
         reseller: !!member, channel: isWa(psid) ? "WhatsApp" : String(psid).startsWith("web_") ? "Website/App" : "Messenger", iccid: sim.iccid });
     }
     notifyAdmin({ title: opts.auto ? "eSIM auto-delivered ✅" : "eSIM delivered", message: `${await getCustomerName(psid)}\n${plan.name}${sim.iccid ? "\nICCID " + sim.iccid : ""}${costUSD ? `\nCost $${Number(costUSD).toFixed(2)}` : ""}`, tags: "white_check_mark" }).catch(() => {});
@@ -1979,7 +1995,8 @@ async function handlePaidCheckout(id, source) {
           if (i > 1) await new Promise((r) => setTimeout(r, 5000)); // let eSIMCard list the previous eSIM first
           const r = await deliverEsim(psid, order.planId, {
             auto: true, paidPHP: Math.round((order.pricePHP / qty) * 100) / 100, reference: qty > 1 ? `${order.ref}-${i}` : order.ref,
-            method: order.method ? `${order.method} (PayMongo)` : "PayMongo", email: order.email, label: qty > 1 ? `eSIM ${i} of ${qty}` : ""
+            method: order.method ? `${order.method} (PayMongo)` : "PayMongo", email: order.email, label: qty > 1 ? `eSIM ${i} of ${qty}` : "",
+            feePHP: Math.round((payFees.feeFor(info.method || order.method || "gcash", order.pricePHP) / qty) * 100) / 100
           });
           iccids.push(r.iccid || null); costTotal += Number(r.costUSD) || 0;
           await pmUpdateOrder(id, { delivered: i, iccids });
@@ -3261,7 +3278,9 @@ async function getClaudeReply(senderId, userText) {
     (pm.configured() && !pm.isTest()
       ? "\n\n--- ONLINE PAYMENT (PayMongo) ---\nFor GCash, Maya, QR Ph or Philippine bank payments, create_order sends the customer a secure payment link " +
         "(QR Ph: scan with GCash, Maya or any bank app" + (pm.methods().includes("card") ? "; cards also accepted" : "") + "). Payment is confirmed automatically and the eSIM QR " +
-        "is sent automatically in this chat within a few minutes, so do NOT ask for a payment screenshot for these orders. PayPal stays manual (screenshot needed)."
+        "is sent automatically in this chat within a few minutes, so do NOT ask for a payment screenshot for these orders." +
+        (pm.methods().includes("card") ? ` Visa/Mastercard credit and debit cards (local or foreign) are accepted for orders of ${formatPHP(payFees.CARD_MIN_PHP)} and up: create_order with paymentMethod "Card" sends a card-only payment link, charged in pesos (their bank converts the currency). For smaller orders offer GCash, Maya or QR Ph.` : " Card payments are coming soon; for now offer GCash, Maya, QR Ph or bank transfer.") +
+        " We do NOT accept PayPal."
       : "");
   // Travel brain: work out the trip from the customer's recent messages and pre-pick the right plan.
   const recentUserTexts = getHistory(senderId).filter((m) => m.role === "user" && typeof m.content === "string")
