@@ -222,6 +222,20 @@
       <div id="ptList" class="help scrollbox">Loading…</div>
     </section>
 
+    <!-- Affiliates -->
+    <section class="card">
+      <span class="step">Affiliates</span>
+      <h2>Affiliate program</h2>
+      <p class="help">People who signed up at 3ukph.com/affiliate. They earn their commission % on paid orders from customers they bring (not their own orders). Pay balances of ₱500+ monthly by GCash/Maya, then tap "Mark paid" (they get an email). Pause an affiliate to stop new commissions.</p>
+      <div class="row" style="margin-bottom:10px">
+        <label style="display:flex;align-items:center;gap:6px">Month <input type="month" id="afMonth" style="max-width:170px"></label>
+        <button class="ghost" id="afLoad">Show</button>
+        <button class="ghost" id="afCsv">⬇ Payout list CSV</button>
+      </div>
+      <div class="status" id="afStatus"></div>
+      <div id="afList" class="help scrollbox">Loading…</div>
+    </section>
+
     <!-- Morning brief + customers -->
     <section class="card">
       <span class="step">Brief &amp; customers</span>
@@ -360,7 +374,7 @@
       $("pageBox").innerHTML = (p.picture ? '<img src="' + esc(p.picture) + '" alt="">' : "") +
         '<div><b style="font-size:18px">' + esc(p.name) + '</b><br><span class="help">' + esc(p.category) + ' · Page ID ' + esc(p.id) +
         '</span><br><span class="badge ok">✓ Connected to Messenger</span></div>';
-      loadConversations(); loadPending(); loadKit(); loadPartners();
+      loadConversations(); loadPending(); loadKit(); loadPartners(); loadAffiliates();
       loadResellers();
     }).catch(function (e) {
       $("loginStatus").textContent = e.message; $("loginStatus").className = "status err";
@@ -657,6 +671,50 @@
     var blob = new Blob(["\ufeff" + lines.join("\n")], { type: "text/csv" });
     var a = document.createElement("a"); a.href = URL.createObjectURL(blob);
     a.download = "3UK-partner-commission-" + (ptData.month || "all") + ".csv"; document.body.appendChild(a); a.click(); a.remove();
+  };
+  // ---- Affiliates ----
+  var afData = null;
+  (function () { var d = new Date(Date.now() + 8 * 3600000); $("afMonth").value = d.toISOString().slice(0, 7); })();
+  function loadAffiliates() {
+    $("afList").textContent = "Loading…";
+    api("/admin/api/affiliates?month=" + encodeURIComponent($("afMonth").value)).then(function (d) {
+      afData = d;
+      if (!d.affiliates.length) { $("afList").textContent = "No affiliates yet. Share 3ukph.com/affiliate to recruit."; return; }
+      $("afList").innerHTML = "<p>" + d.affiliates.length + " affiliate(s) · commission " + d.pct + "% · payout minimum " + peso(d.minPayoutPHP) + "</p>" +
+        "<table style='width:100%;border-collapse:collapse;font-size:13px'><tr><th align=left>Affiliate</th><th align=left>Payout to</th><th align=right>Clicks</th><th align=right>Chats</th><th align=right>" + esc(d.month) + " sales</th><th align=right>" + esc(d.month) + " comm.</th><th align=right>Balance</th><th></th></tr>" +
+        d.affiliates.map(function (a) {
+          return "<tr style='border-top:1px solid #e3e6f0'><td><b>" + esc(a.code) + "</b>" + (a.status === "paused" ? " <span style='color:#b3261e'>(paused)</span>" : "") + "<br>" + esc(a.name) + "<br><small>" + esc(a.email) + " · " + esc(a.mobile) + "</small>" + (a.how ? "<br><small>" + esc(a.how) + "</small>" : "") +
+            "</td><td>" + esc(a.payoutMethod) + " +" + esc(a.payoutNumber) + "<br><small>" + esc(a.payoutName) + "</small></td><td align=right>" + a.clicksAllTime + "</td><td align=right>" + a.chats +
+            "</td><td align=right>" + a.monthOrders + " · " + peso(a.monthSalesPHP) + "</td><td align=right>" + peso(a.monthCommissionPHP) + "</td><td align=right><b" + (a.payoutDue ? " style='color:#0e7a3e'" : "") + ">" + peso(a.balancePHP) + "</b>" + (a.payoutDue ? "<br><small>due</small>" : "") +
+            "</td><td><button class='ghost' data-afpay='" + esc(a.code) + "' data-bal='" + a.balancePHP + "'>Mark paid</button> <button class='ghost' data-afst='" + esc(a.code) + "' data-to='" + (a.status === "paused" ? "active" : "paused") + "'>" + (a.status === "paused" ? "Resume" : "Pause") + "</button></td></tr>";
+        }).join("") + "</table>";
+      Array.prototype.forEach.call(document.querySelectorAll("[data-afpay]"), function (b) {
+        b.onclick = function () {
+          var amt = prompt("Amount you sent to " + b.getAttribute("data-afpay") + " (₱):", b.getAttribute("data-bal"));
+          if (!amt) return;
+          var note = prompt("GCash/Maya reference no. (optional):", "") || "";
+          api("/admin/api/affiliates/paid", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: b.getAttribute("data-afpay"), amountPHP: Number(amt), month: $("afMonth").value, note: note }) })
+            .then(function () { $("afStatus").className = "status ok"; $("afStatus").textContent = "✓ Payout recorded and the affiliate was emailed."; loadAffiliates(); })
+            .catch(function (e) { $("afStatus").className = "status err"; $("afStatus").textContent = e.message; });
+        };
+      });
+      Array.prototype.forEach.call(document.querySelectorAll("[data-afst]"), function (b) {
+        b.onclick = function () {
+          api("/admin/api/affiliates/status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: b.getAttribute("data-afst"), status: b.getAttribute("data-to") }) })
+            .then(loadAffiliates).catch(function (e) { $("afStatus").className = "status err"; $("afStatus").textContent = e.message; });
+        };
+      });
+    }).catch(function (e) { $("afList").textContent = "Couldn't load: " + e.message; });
+  }
+  $("afLoad").onclick = loadAffiliates;
+  $("afMonth").onchange = loadAffiliates;
+  $("afCsv").onclick = function () {
+    if (!afData) return;
+    var q = function (v) { v = v == null ? "" : String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+    var lines = [["Code", "Name", "Email", "Payout method", "Payout number", "Account name", "Balance (PHP)", "Due"].join(",")];
+    afData.affiliates.forEach(function (a) { lines.push([a.code, a.name, a.email, a.payoutMethod, "+" + a.payoutNumber, a.payoutName, a.balancePHP.toFixed(2), a.payoutDue ? "yes" : "no"].map(q).join(",")); });
+    var blob = new Blob(["\ufeff" + lines.join("\n")], { type: "text/csv" });
+    var x = document.createElement("a"); x.href = URL.createObjectURL(blob); x.download = "3UK-affiliate-payouts-" + afData.month + ".csv"; document.body.appendChild(x); x.click(); x.remove();
   };
   $("brPreview").onclick = function () {
     $("brOut").textContent = "Loading…";

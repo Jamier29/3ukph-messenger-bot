@@ -1312,6 +1312,9 @@ appApi.install(app, { redis: (c) => redis(c), hasDb: () => hasDb(), mailer, esim
   pmSaveOrder: (id, o) => pmSaveOrder(id, o), pmGetOrder: (id) => pmGetOrder(id), notifyAdmin: (x) => notifyAdmin(x), express });
 // Tour referrals with TripHappy.ph: /tours page + inquiry form. See tours.js.
 require("./tours").install(app, { redis: (c) => redis(c), hasDb: () => hasDb(), mailer, notifyAdmin: (x) => notifyAdmin(x), requireAdmin, express, publicUrl: PUBLIC_URL });
+// Open affiliate program: 3ukph.com/affiliate sign-up + dashboard, /r/CODE links. See affiliates.js.
+require("./affiliates").install(app, { redis: (c) => redis(c), hasDb: () => hasDb(), mailer, partners, requireAdmin, express, notifyAdmin: (x) => notifyAdmin(x),
+  reservedCodes: (c) => !!DISCOUNT_CODES[String(c).toUpperCase()] });
 // Public plan-finder API used by the website (peso prices only, no cost data)
 app.get("/api/destinations", (req, res) => res.json(listAllDestinations()));
 app.get("/api/plans", (req, res) => {
@@ -1868,7 +1871,7 @@ app.post("/admin/api/deliver", requireAdmin, async (req, res) => {
       const quoted = lo && Number(String(lo.price || "").replace(/[^0-9.]/g, ""));
       const loQty = (lo && Number(lo.quantity)) || 1;
       const unit = quoted > 0 && lo.planId === String(b.planId) ? quoted / loQty : plan && plan.pricePHP;
-      await creditPartner(psid, results[0].iccid || `manual-${psid}-${Date.now()}`, unit * results.length, plan && plan.name, results.length);
+      await creditPartner(psid, results[0].iccid || `manual-${psid}-${Date.now()}`, unit * results.length, plan && plan.name, results.length, lo && lo.email);
     })().catch(() => {});
   }
   if (qty === 1) return res.json(results[0]);
@@ -1997,7 +2000,7 @@ async function handlePaidCheckout(id, source) {
       return;
     }
     if (!isWeb(psid)) capi.sendPurchase({ psid, valuePHP: order.pricePHP, email: order.email, ref: order.ref, planName: order.planName }).catch(() => {});
-    creditPartner(psid, order.ref, order.pricePHP, order.planName, order.quantity).catch(() => {});
+    creditPartner(psid, order.ref, order.pricePHP, order.planName, order.quantity, order.email).catch(() => {});
     if (!AUTO_DELIVER) return manual("Automatic delivery is switched off (AUTO_DELIVER=off).");
     if (order.pricePHP > AUTO_DELIVER_MAX_PHP) return manual(`Order is above the auto-delivery limit of ${formatPHP(AUTO_DELIVER_MAX_PHP)}.`);
     if ((await pmDailyCount()) > AUTO_DELIVER_DAILY_MAX) return manual(`Daily auto-delivery limit (${AUTO_DELIVER_DAILY_MAX}) reached.`);
@@ -3076,7 +3079,7 @@ async function handleMessagingEvent(event) {
     // Opened the partner link in an existing chat (no message yet): greet them so the chat starts.
     if (!message && !event.postback) {
       const p = partners.info(adRef.ref);
-      const hi = `Hi! 👋 Welcome, ${p.name} traveler! I'm the 3UK Philippines eSIM assistant. Where are you travelling, and for how many days? I'll find the best plan for you. 😊`;
+      const hi = `Hi! 👋 Welcome${p.affiliate ? "" : `, ${p.name} traveler`}! I'm the 3UK Philippines eSIM assistant. Where are you travelling, and for how many days? I'll find the best plan for you. 😊`;
       await sendText(String(event.sender.id), hi).catch(() => {});
       return;
     }
@@ -3164,9 +3167,9 @@ async function guardAllows(senderId, text) {
 }
 
 // Credits a paid order to the customer's referral partner (resellers' own purchases don't count).
-async function creditPartner(psid, orderRef, amountPHP, planName, quantity) {
+async function creditPartner(psid, orderRef, amountPHP, planName, quantity, buyerEmail) {
   if (await getResellerSafe(psid)) return null;
-  const r = await partners.recordPaid({ senderId: psid, orderRef, amountPHP, plan: planName, quantity,
+  const r = await partners.recordPaid({ senderId: psid, orderRef, amountPHP, plan: planName, quantity, buyerEmail,
     // Partner has a reseller wallet: put the commission there right away and tell them.
     creditWallet: async (wallet, rec) => {
       const w = await reseller.walletTransaction(wallet, { type: "adjust", amountPHP: rec.commissionPHP, note: `Partner commission ${rec.pct}% on ${rec.orderRef}`, by: "partner" });

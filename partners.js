@@ -27,9 +27,18 @@ const memDone = new Set();
 function init(redisFn) { redis = redisFn; }
 
 const norm = (c) => String(c || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
-function isCode(code) { return !!PARTNERS[norm(code)]; }
-function info(code) { return PARTNERS[norm(code)] || null; }
-function list() { return Object.values(PARTNERS); }
+
+// Affiliates (anyone who signed up at 3ukph.com/affiliate) are added here at runtime by affiliates.js.
+// { code, name, pct, email, selfIds: ["wa63917..."], status: "active"|"paused", affiliate: true }
+const DYN = {};
+function addDynamic(rec) { if (rec && rec.code) DYN[norm(rec.code)] = { ...rec, code: norm(rec.code) }; }
+function getAny(code) { const c = norm(code); return PARTNERS[c] || DYN[c] || null; }
+function getP(code) { const p = getAny(code); return p && p.status === "paused" ? null : p; }
+
+function isCode(code) { return !!getP(code); }
+function info(code) { return getP(code); }
+function list() { return Object.values(PARTNERS); } // the fixed partners (affiliates have their own console card)
+function listAffiliates() { return Object.values(DYN); }
 
 // Finds a partner code written anywhere in a message ("TRIPHAPPY", "ref: triphappy", "Partner: TRIPHAPPY").
 function findCodeInText(text) {
@@ -39,12 +48,20 @@ function findCodeInText(text) {
     // Also "Trip Happy", "triphappy.ph", "trip-happy" (long codes only, to avoid false matches).
     if (code.length >= 6 && t.replace(/[^A-Z0-9]/g, "").includes(code)) return code;
   }
+  // Affiliate codes (letters + digits, e.g. MARIA482): exact word match only.
+  for (const [code, p] of Object.entries(DYN)) {
+    if (p.status === "paused") continue;
+    if (new RegExp(`(^|[^A-Z0-9])${code}([^A-Z0-9]|$)`).test(t)) return code;
+  }
   return null;
 }
 
 async function attach(senderId, code, source) {
   const c = norm(code);
-  if (!senderId || !PARTNERS[c]) return false;
+  if (!senderId || !getP(c)) return false;
+  // Count each new chat once per partner (for the affiliate dashboard).
+  const prev = await linkOf(senderId).catch(() => null);
+  if (redis && (!prev || prev.code !== c)) await redis(["INCR", `partner:chats:${c}`]).catch(() => {});
   const rec = { code: c, source: source || "", at: Date.now() };
   memLink.set(String(senderId), rec);
   if (redis) await redis(["SET", `partner:link:${senderId}`, JSON.stringify(rec), "EX", String(LINK_DAYS * 86400)]).catch(() => {});
@@ -75,7 +92,7 @@ async function walletOf(code) {
 }
 async function setWallet(code, psid) {
   const c = norm(code);
-  if (!PARTNERS[c]) throw new Error("Unknown partner code.");
+  if (!getAny(c)) throw new Error("Unknown partner code.");
   const v = String(psid || "").trim();
   if (v && !/^(wa)?\d+$/.test(v)) throw new Error("Bad chat id.");
   if (redis) await redis(v ? ["SET", `partner:wallet:${c}`, v] : ["DEL", `partner:wallet:${c}`]);
@@ -85,11 +102,17 @@ async function setWallet(code, psid) {
 
 // Record a PAID order for the customer's partner (once per orderRef). Returns the record or null.
 // creditWallet(walletPsid, rec) is called when the partner has a commission wallet; it should return true when credited.
-async function recordPaid({ senderId, orderRef, amountPHP, plan, quantity, creditWallet }) {
+async function recordPaid({ senderId, orderRef, amountPHP, plan, quantity, creditWallet, buyerEmail }) {
   try {
     const link = await linkOf(senderId);
-    if (!link || !PARTNERS[link.code] || !(amountPHP > 0) || !orderRef) return null;
-    const p = PARTNERS[link.code];
+    if (!link || !getP(link.code) || !(amountPHP > 0) || !orderRef) return null;
+    const p = getP(link.code);
+    // No commission on an affiliate's own purchases.
+    const em = String(buyerEmail || "").trim().toLowerCase();
+    if (p.affiliate && ((p.selfIds || []).includes(String(senderId)) || (em && em === String(p.email || "").toLowerCase()))) {
+      console.log(`[partners] ${p.code}: own purchase ${orderRef}, no commission`);
+      return null;
+    }
     const key = `partner:done:${orderRef}`;
     if (redis) {
       const ok = await redis(["SET", key, "1", "NX", "EX", String(400 * 86400)]);
@@ -121,7 +144,7 @@ async function recordPaid({ senderId, orderRef, amountPHP, plan, quantity, credi
 
 // All recorded orders for a partner, optionally for one month "YYYY-MM" (Manila time).
 async function statement(code, month) {
-  const p = info(code);
+  const p = getAny(code);
   if (!p) return null;
   let rows = [];
   if (redis) {
@@ -137,4 +160,4 @@ async function statement(code, month) {
     creditedToWalletPHP: Math.round(credited * 100) / 100, stillToPayPHP: Math.round((commission - credited) * 100) / 100, wallet: await walletOf(p.code), rows };
 }
 
-module.exports = { init, isCode, info, list, findCodeInText, attach, linkOf, noteText, recordPaid, statement, walletOf, setWallet };
+module.exports = { init, isCode, info, list, listAffiliates, addDynamic, getAny, norm, findCodeInText, attach, linkOf, noteText, recordPaid, statement, walletOf, setWallet };

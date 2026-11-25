@@ -453,7 +453,8 @@ footer a{color:#fff}
   var silent=null;
   try{var q=new URLSearchParams(location.search).get('ref');var c=q&&q.toUpperCase().replace(/[^A-Z0-9]/g,'');
     if(c&&PARTNERS[c]){p=PARTNERS[c];localStorage.setItem(KEY,JSON.stringify({code:c,at:Date.now()}));}
-    else{var s=JSON.parse(localStorage.getItem(KEY)||'null');if(s&&PARTNERS[s.code]&&Date.now()-s.at<DAYS*864e5)silent=PARTNERS[s.code];}
+    else if(c&&/^[A-Z]{2,6}[0-9]{3}$/.test(c)){silent={code:c};localStorage.setItem(KEY,JSON.stringify({code:c,at:Date.now(),aff:1}));} /* affiliate link (3ukph.com/r/CODE): normal site, chats carry the code */
+    else{var s=JSON.parse(localStorage.getItem(KEY)||'null');if(s&&(PARTNERS[s.code]||s.aff)&&Date.now()-s.at<DAYS*864e5)silent=PARTNERS[s.code]||{code:s.code};}
   }catch(e){}
   if(p){window.__PARTNER=p;document.documentElement.classList.add('partner');}
   window.__PARTNER_REF=p||silent;
@@ -930,7 +931,7 @@ html.partner #ccWa,html.partner a[href*="wa.me"],html.partner a[href*="api.whats
         <div class="tag">Global Connections. Endless Possibilities.</div>
         <p style="margin-top:10px"><a href="#" data-install style="color:#f8c830;font-weight:700">📲 Install our app (Android, iPhone, computer)</a></p>
       </div>
-      <div><h4>Explore</h4><ul><li><a href="#finder">Find a plan</a></li><li><a href="#seafarers">For seafarers</a></li><li><a href="#calc">Data calculator</a></li><li><a href="#reviews">Reviews</a></li><li><a href="#trivia">Crew trivia</a></li><li><a href="#faq">FAQ</a></li><li><a href="https://3ukph.com/privacy">Privacy Policy</a></li></ul></div>
+      <div><h4>Explore</h4><ul><li><a href="#finder">Find a plan</a></li><li><a href="#seafarers">For seafarers</a></li><li><a href="#calc">Data calculator</a></li><li><a href="#reviews">Reviews</a></li><li><a href="#trivia">Crew trivia</a></li><li><a href="#faq">FAQ</a></li><li><a href="/affiliate">Earn with us (affiliates)</a></li><li><a href="https://3ukph.com/privacy">Privacy Policy</a></li></ul></div>
       <div><h4>Contact</h4><ul><li><a href="https://api.whatsapp.com/send?phone=639347069356" data-direct="1">WhatsApp: +63 934 706 9356</a></li><li><a href="https://www.messenger.com/t/103294518884622" data-direct="1">Messenger: 3UK Philippines</a></li><li><a href="tel:+639672130757">+63 967 213 0757</a></li><li><a href="mailto:admin@3ukph.com">admin@3ukph.com</a></li><li>Taguig City, Metro Manila, Philippines</li></ul></div>
     </div>
     <div class="compliance" id="compliance">
