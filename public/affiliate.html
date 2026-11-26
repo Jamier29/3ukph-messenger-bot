@@ -17,45 +17,61 @@
 @media (prefers-color-scheme: dark){:root{--navy:#24399a;--blue:#7b9bff;--on-blue:#0b0e1e;--red:#ff5a5c;--on-red:#0b0e1e;--gold:#e0a21c;--surface:#0b0e1e;--raised:#161b36;--ink:#f3f5fb;--muted:#a9b0cc;--border:#5a628a;--hair:#252b4a;--ok:#3fcb7a;--bad:#ff8a80;--shadow:0 4px 16px rgba(0,0,0,.45)}}
 *{box-sizing:border-box}body{margin:0;font:400 16px/24px var(--font);color:var(--ink);background:var(--surface);overflow-x:hidden}
 a{color:var(--blue)}.wrap{max-width:1040px;margin:0 auto;padding:0 16px}h1,h2,h3{margin:0}
-.label{font:700 12px/16px var(--font);letter-spacing:.08em;text-transform:uppercase;color:var(--red)}
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;font:600 16px/24px var(--font);text-decoration:none;cursor:pointer;border:2px solid transparent;border-radius:var(--r);padding:12px 22px}
-.btn:hover{filter:brightness(1.1)}.btn:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
-.primary{background:var(--blue);color:var(--on-blue)}.accent{background:var(--red);color:var(--on-red)}.ghost{background:transparent;color:var(--blue);border-color:var(--blue)}.small{padding:6px 12px;font-size:14px;line-height:20px}
+.label{font:600 14px/20px var(--font);color:var(--muted)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;font:600 16px/24px var(--font);text-decoration:none;cursor:pointer;border:1px solid transparent;border-radius:10px;padding:10px 20px;min-height:44px;transition:background-color .15s cubic-bezier(.22,1,.36,1),transform .15s cubic-bezier(.22,1,.36,1)}
+.btn:active{transform:scale(.98)}
+.accent:hover{background:#b00406}.primary:hover{background:#00166a}.ghost:hover{background:var(--raised)}.btn:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.primary{background:var(--blue);color:var(--on-blue)}.accent{background:var(--red);color:var(--on-red)}.ghost{background:transparent;color:var(--blue);border-color:var(--blue)}.small{padding:6px 14px;font-size:14px;line-height:20px;min-height:36px}
+.linkbtn{background:none;border:0;padding:4px 0;color:var(--blue);font:600 14px/20px var(--font);cursor:pointer}.linkbtn:hover{text-decoration:underline}
 .btn[disabled]{opacity:.6;cursor:wait}
-header{border-bottom:1px solid var(--hair);background:var(--surface)}.bar{display:flex;align-items:center;justify-content:space-between;height:66px;gap:12px}
-.brand{display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--ink);font:800 18px/1 var(--font)}.brand img{width:42px;height:42px;border-radius:50%;background:#fff}
+header{border-bottom:1px solid var(--hair);background:var(--surface)}.bar{display:flex;align-items:center;justify-content:space-between;height:64px;gap:12px}
+.brand{display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--ink);font:600 17px/1 var(--font)}.brand img{width:42px;height:42px;border-radius:50%;background:#fff}
 @media(max-width:420px){.brand span{display:none}}
-.hero{background:linear-gradient(160deg,#00166a,#012ca5 70%);color:#fff;padding:44px 0 52px}.hero .label{color:var(--gold-l)}
-.hero h1{font:800 clamp(30px,5.4vw,50px)/1.1 var(--font);margin:8px 0 14px}.hero p{color:#dfe4f5;max-width:620px;margin:0 0 22px;font-size:18px;line-height:28px}
-.perks{display:grid;gap:12px;margin-top:28px;list-style:none;padding:0}@media(min-width:760px){.perks{grid-template-columns:repeat(4,1fr)}}
-.perks li{background:rgba(255,255,255,.09);border-radius:var(--r);padding:14px 16px;font-size:15px;line-height:22px}.perks b{display:block;color:var(--gold-l);font-size:22px;line-height:28px}
-section{padding:44px 0}.two{display:grid;gap:28px}@media(min-width:900px){.two{grid-template-columns:1fr 1fr;align-items:start}}
+.hero{background:#00166a;color:#fff;padding:64px 0 72px;overflow:hidden}.hero .label{color:var(--gold-l)}
+.hero-grid{display:grid;gap:48px;align-items:center}@media(min-width:900px){.hero-grid{grid-template-columns:1.1fr .9fr}}
+.hero h1{font:600 clamp(38px,5.2vw,56px)/1.06 var(--font);letter-spacing:-.02em;margin:12px 0 20px}.hero p{color:#c9d1ee;max-width:36rem;margin:0 0 28px;font-size:18px;line-height:28px}
+.perks{display:grid;grid-template-columns:repeat(2,1fr);gap:20px 0;margin:40px 0 0;list-style:none;padding:0}
+.perks li{border-left:1px solid rgba(255,255,255,.16);padding:0 16px;font-size:14px;line-height:20px;color:#c9d1ee}.perks b{display:block;color:#fff;font:600 20px/28px var(--font);font-variant-numeric:tabular-nums}
+section{padding:64px 0}.two{display:grid;gap:28px}@media(min-width:900px){.two{grid-template-columns:1fr 1fr;align-items:start}}
 .card{background:var(--surface);border:1px solid var(--hair);border-radius:16px;box-shadow:var(--shadow);padding:22px}
-.card h2{font:700 22px/28px var(--font);margin:4px 0 6px}.sub{color:var(--muted);font-size:14px;line-height:20px;margin:0 0 16px}
-form{display:grid;gap:13px}label.f{display:grid;gap:6px;font:600 14px/20px var(--font)}.opt{font-weight:400;color:var(--muted)}
-input,select,textarea{font:400 16px/22px var(--font);color:var(--ink);background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:10px 12px;width:100%}
+.card h2{font:600 22px/28px var(--font);margin:4px 0 6px}.sub{color:var(--muted);font-size:14px;line-height:20px;margin:0 0 16px}
+form{display:grid;gap:13px}label.f{display:grid;gap:6px;font:500 14px/20px var(--font)}.opt{font-weight:400;color:var(--muted)}
+input,select,textarea{font:400 16px/22px var(--font);color:var(--ink);background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px 12px;width:100%;min-height:44px}
 textarea{min-height:70px;resize:vertical}.row2{display:grid;gap:13px;grid-template-columns:1fr 1fr}@media(max-width:520px){.row2{grid-template-columns:1fr}}
 .check{display:flex;gap:10px;align-items:flex-start;font-size:14px;line-height:20px;color:var(--muted)}.check input{width:20px;height:20px;margin-top:1px;flex:none}
 .err{color:var(--bad);font:600 14px/20px var(--font)}.okm{color:var(--ok);font:600 14px/20px var(--font)}.hp{position:absolute;left:-9999px}.hidden{display:none!important}
 .steps{list-style:none;padding:0;margin:0;display:grid;gap:12px;counter-reset:s}.steps li{counter-increment:s;position:relative;padding:2px 0 2px 44px}
-.steps li::before{content:counter(s);position:absolute;left:0;top:0;width:30px;height:30px;border-radius:50%;background:var(--blue);color:var(--on-blue);font:800 15px/30px var(--font);text-align:center}
-details{border-top:1px solid var(--hair);padding:12px 0}details summary{font-weight:700;cursor:pointer}details p{color:var(--muted);margin:8px 0 0;font-size:15px}
+.steps li::before{content:counter(s);position:absolute;left:0;top:0;width:28px;height:28px;border-radius:50%;border:1px solid var(--hair);color:var(--navy);font:600 14px/26px var(--font);text-align:center;font-variant-numeric:tabular-nums}
+details{border-top:1px solid var(--hair);padding:12px 0}details summary{font-weight:600;cursor:pointer}details p{color:var(--muted);margin:8px 0 0;font-size:15px}
 /* dashboard */
 .dash-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px}
-.code{font:800 30px/36px var(--font);letter-spacing:2px;color:var(--navy)}@media (prefers-color-scheme: dark){.code{color:var(--gold-l)}}
+.code{font:600 30px/36px ui-monospace,"SF Mono",Menlo,Consolas,monospace;letter-spacing:.04em;color:var(--navy)}@media (prefers-color-scheme: dark){.code{color:var(--gold-l)}}
 .tiles{display:grid;gap:12px;grid-template-columns:repeat(2,1fr);margin:14px 0 22px}@media(min-width:760px){.tiles{grid-template-columns:repeat(4,1fr)}}
-.tile{background:var(--raised);border-radius:var(--r);padding:14px}.tile .k{font:700 11px/16px var(--font);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}.tile .v{font:800 24px/30px var(--font);margin-top:4px}
+.tile{background:var(--raised);border-radius:var(--r);padding:14px}.tile .k{font:500 13px/18px var(--font);color:var(--muted)}.tile .v{font:600 28px/32px var(--font);margin-top:8px;font-variant-numeric:tabular-nums}
 .links{display:grid;gap:10px}.lnk{display:grid;grid-template-columns:110px 1fr auto;gap:10px;align-items:center;background:var(--raised);border-radius:var(--r);padding:10px 12px}
-.lnk span{font:700 13px/18px var(--font)}.lnk code{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}
+.lnk span{font:600 13px/18px var(--font)}.lnk code{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}
 @media(max-width:560px){.lnk{grid-template-columns:1fr auto}.lnk span{grid-column:1/-1}}
-table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--hair)}th{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}td.n,th.n{text-align:right}
+table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--hair)}th{font:500 12px/16px var(--font);color:var(--muted)}td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 .tblwrap{overflow-x:auto}
 footer{background:#00166a;color:#dfe4f5;padding:28px 0;font-size:14px}footer a{color:#fff}.foot{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px}
 .dchips{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}.dchip{font:600 14px/20px var(--font);padding:7px 14px;border-radius:999px;border:1px solid var(--border);background:var(--surface);color:var(--ink);cursor:pointer}
 .dchip[aria-pressed="true"]{background:var(--blue);border-color:var(--blue);color:var(--on-blue)}
 .plans{display:grid;gap:10px;margin-top:12px}.pl{display:grid;grid-template-columns:1fr auto;gap:8px 12px;align-items:center;background:var(--raised);border-radius:var(--r);padding:12px 14px}
-.pl b{font-size:15px}.pl .pr{font:800 18px/24px var(--font);color:var(--navy)}@media (prefers-color-scheme: dark){.pl .pr{color:var(--gold-l)}}.pl .acts{grid-column:1/-1;display:flex;gap:8px;flex-wrap:wrap}
+.pl b{font-size:15px}.pl .pr{font:600 18px/24px var(--font);color:var(--navy);font-variant-numeric:tabular-nums}@media (prefers-color-scheme: dark){.pl .pr{color:var(--gold-l)}}.pl .acts{grid-column:1/-1;display:flex;gap:16px;flex-wrap:wrap}
 .cap{white-space:pre-wrap;background:var(--raised);border-radius:var(--r);padding:14px;font-size:14px;line-height:21px;margin-top:12px}
+.pass{display:grid;grid-template-columns:1fr auto;background:var(--surface);border:1px solid var(--hair);border-radius:14px;position:relative;overflow:hidden}
+.pass .main{padding:16px 20px}.pass .stub{padding:16px 20px;border-left:1px dashed var(--border);display:flex;flex-direction:column;justify-content:center;text-align:right;min-width:112px}
+.pass::before,.pass::after{content:"";position:absolute;width:18px;height:18px;border-radius:50%;background:var(--pagebg,var(--surface));border:1px solid var(--hair);right:103px}
+.pass::before{top:-10px}.pass::after{bottom:-10px}
+.pass .k{font:500 12px/16px var(--font);color:var(--muted)}.pass .stub b{font:600 20px/24px var(--font);color:var(--gold);font-variant-numeric:tabular-nums}
+.phone{justify-self:center;width:320px;max-width:100%;margin:0 auto;background:#0b1233;border-radius:40px;padding:10px;box-shadow:0 24px 60px rgba(0,0,0,.35)}
+.phone .scr{background:#eef1f8;border-radius:32px;overflow:hidden;color:#0b1233}
+.phone .top{background:#fff;padding:22px 16px 12px;border-bottom:1px solid #e3e6f0;font:600 14px/20px var(--font)}.phone .top small{display:block;font:400 12px/16px var(--font);color:#4a5170}
+.phone .body{padding:16px 12px 18px;display:grid;gap:12px}
+.bubble{justify-self:end;max-width:92%;background:#dfe8ff;border-radius:16px 16px 4px 16px;padding:10px 12px;font:400 13px/19px var(--font);white-space:pre-line}
+.lpv{justify-self:end;width:92%;background:#fff;border:1px solid #e3e6f0;border-radius:12px;padding:10px 12px;font:400 12px/16px var(--font);color:#4a5170}.lpv b{display:block;color:#0b1233;font:600 13px/18px var(--font)}
+.phone .pass{--pagebg:#eef1f8;background:#fff;border-color:#e3e6f0;color:#0b1233}.phone .pass .main,.phone .pass .stub{padding:12px 14px}.phone .pass .code{font-size:22px;line-height:28px;color:#00166a}.phone .pass .stub{min-width:92px;border-left-color:#8a91ad}.phone .pass .k{color:#4a5170}.phone .pass .stub b{color:#c48205}.phone .pass::before,.phone .pass::after{right:83px;border-color:#e3e6f0}
+.hero .sample{font:400 13px/18px var(--font);color:#8a91ad;text-align:center;margin:16px 0 0;max-width:none}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:var(--surface);padding:10px 18px;border-radius:999px;font:600 14px/20px var(--font);z-index:50}
 </style>
 </head>
@@ -63,23 +79,40 @@ footer{background:#00166a;color:#dfe4f5;padding:28px 0;font-size:14px}footer a{c
 <header><div class="wrap bar"><a class="brand" href="/"><img src="/logo.png" alt=""><span>3UK Philippines</span></a><a class="btn ghost small" href="/">Travel eSIMs</a></div></header>
 
 <div id="landing">
-  <div class="hero"><div class="wrap">
-    <span class="label">3UK Affiliate Program</span>
-    <h1>Share travel eSIMs. Earn on every sale.</h1>
-    <p>Get your own link and code in one minute. Every time someone buys a 3UK eSIM through you, you earn a commission, paid to your GCash or Maya.</p>
-    <a class="btn accent" href="#join">Join free</a>
-    <ul class="perks">
-      <li><b id="pctTxt">5%</b>of every paid order from your customers</li>
-      <li><b>Free</b>no fees, no stock, approved instantly</li>
-      <li><b>Monthly</b>payouts by GCash or Maya (from ₱500)</li>
-      <li><b>24/7</b>our AI assistant closes the sale for you</li>
-    </ul>
+  <div class="hero"><div class="wrap hero-grid">
+    <div>
+      <span class="label">3UK affiliate program</span>
+      <h1>Share travel eSIMs. Earn on every sale.</h1>
+      <p>Get your own link and code in one minute. Every time someone buys a 3UK eSIM through you, you earn a commission, paid to your GCash or Maya.</p>
+      <a class="btn accent" href="#join">Join free</a>
+      <ul class="perks">
+        <li><b id="pctTxt">5%</b>of every paid order from your customers</li>
+        <li><b>Free</b>no fees, no stock, approved instantly</li>
+        <li><b>Monthly</b>payouts by GCash or Maya (from ₱500)</li>
+        <li><b>24/7</b>our AI assistant closes the sale for you</li>
+      </ul>
+    </div>
+    <div>
+      <div class="phone" aria-hidden="true"><div class="scr">
+        <div class="top">Barkada trip 2027<small>Group chat · 6 members</small></div>
+        <div class="body">
+          <div class="bubble" id="pvCap">🇯🇵 Papuntang Japan? May data ka na agad pagdating 📶
+• Japan eSIM, QR in minutes
+• Bayad via GCash, Maya o bank
+
+👉 3ukph.com/r/JUAN482?d=Japan</div>
+          <div class="lpv"><b>3UK Philippines · Travel eSIMs</b>Data for 200+ destinations</div>
+          <div class="pass"><div class="main"><div class="k">Your code</div><div class="code">JUAN482</div></div><div class="stub"><div class="k">You earn</div><b>5%</b></div></div>
+        </div>
+      </div></div>
+      <p class="sample">Sample post from your dashboard</p>
+    </div>
   </div></div>
 
   <section><div class="wrap two">
     <div>
       <span class="label">How it works</span>
-      <h2 style="font:700 28px/34px var(--font);margin:8px 0 18px">From sign-up to payout in four steps</h2>
+      <h2 style="font:600 28px/34px var(--font);margin:8px 0 18px">From sign-up to payout in four steps</h2>
       <ol class="steps">
         <li><b>Sign up</b> and get your code and links instantly.</li>
         <li><b>Share</b> them with travelers, seafarers, crew, OFWs, your barkada and your followers on Facebook, TikTok, Instagram and group chats.</li>
@@ -122,7 +155,7 @@ footer{background:#00166a;color:#dfe4f5;padding:28px 0;font-size:14px}footer a{c
 
   <section id="terms" style="background:var(--raised)"><div class="wrap">
     <span class="label">Affiliate terms</span>
-    <h2 style="font:700 24px/30px var(--font);margin:8px 0 12px">Commission, payouts and conduct</h2>
+    <h2 style="font:600 24px/30px var(--font);margin:8px 0 12px">Commission, payouts and conduct</h2>
     <ul style="color:var(--muted);margin:0;padding-left:20px;max-width:760px">
       <li>You earn the commission rate shown on your dashboard (currently <span class="pctT">5%</span>) on the amount paid for each order by customers linked to you, after the payment is confirmed.</li>
       <li>A customer is linked to you for 12 months after they use your link or code, unless they later use another affiliate's link.</li>
@@ -151,13 +184,12 @@ footer{background:#00166a;color:#dfe4f5;padding:28px 0;font-size:14px}footer a{c
 
 <section id="dash" class="hidden"><div class="wrap">
   <div class="dash-head">
-    <div><span class="label">Your affiliate dashboard</span><h2 style="font:700 24px/30px var(--font);margin-top:4px" id="hello">Hi!</h2></div>
+    <div><span class="label">Affiliate dashboard</span><h2 style="font:600 28px/34px var(--font);margin-top:4px" id="hello">—</h2></div>
     <button class="btn ghost small" id="logout">Sign out</button>
   </div>
   <div class="card">
-    <div class="sub" style="margin:0">Your code</div>
-    <div class="code" id="myCode">—</div>
-    <p class="sub" style="margin:6px 0 14px">Customers can type this code in their first message to us, or use one of your links:</p>
+    <div class="pass" style="margin-bottom:16px"><div class="main"><div class="k">Your code</div><div class="code" id="myCode">—</div></div><div class="stub"><div class="k">You earn</div><b class="pctT">5%</b></div></div>
+    <p class="sub" style="margin:0 0 14px">Customers can type this code in their first message to us, or use one of your links:</p>
     <div class="links" id="links"></div>
   </div>
 
@@ -239,12 +271,12 @@ footer{background:#00166a;color:#dfe4f5;padding:28px 0;font-size:14px}footer a{c
   function render(d){
     var p=d.profile,s=d.stats;
     document.querySelectorAll('.pctT').forEach(function(x){x.textContent=p.pct+'%'});
-    $('hello').textContent='Hi, '+(p.name||'').split(' ')[0]+'!';
+    $('hello').textContent=p.name||'Your dashboard';
     $('myCode').textContent=p.code;
     var L=p.links,rows=[['Website',L.website],['Messenger',L.messenger],['WhatsApp',L.whatsapp]];
     $('links').innerHTML=rows.map(function(r,i){return '<div class="lnk"><span>'+r[0]+'</span><code title="'+esc(r[1])+'">'+esc(r[1])+'</code><button class="btn ghost small" data-copy="'+i+'">Copy</button></div>'}).join('');
     $('links').querySelectorAll('[data-copy]').forEach(function(b){b.onclick=function(){var v=rows[+b.getAttribute('data-copy')][1];
-      (navigator.clipboard?navigator.clipboard.writeText(v):Promise.reject()).then(function(){toast('Copied!')}).catch(function(){prompt('Copy your link:',v)})}});
+      (navigator.clipboard?navigator.clipboard.writeText(v):Promise.reject()).then(function(){toast('Copied')}).catch(function(){prompt('Copy your link:',v)})}});
     $('tClicks').textContent=s.clicksThisMonth;$('tSales').textContent=s.thisMonth.orders;$('tEarn').textContent=peso(s.thisMonth.commissionPHP);$('tBal').textContent=peso(s.balancePHP);
     $('tChats').textContent=s.chats;$('tClicksAll').textContent=s.clicksAllTime;$('tAll').textContent=peso(s.earnedAllTimePHP);$('tPaid').textContent=peso(s.paidOutPHP);$('minPay').textContent=s.minPayoutPHP;
     $('recent').innerHTML=s.recent.length?s.recent.map(function(r){return '<tr><td>'+day(r.at)+'</td><td>'+esc((r.quantity>1?r.quantity+' × ':'')+r.plan)+'</td><td class="n">'+peso(r.amountPHP)+'</td><td class="n">'+peso(r.commissionPHP)+'</td></tr>'}).join(''):'<tr><td colspan="4" style="color:var(--muted)">No sales yet. Share your link to get started!</td></tr>';
@@ -258,8 +290,8 @@ footer{background:#00166a;color:#dfe4f5;padding:28px 0;font-size:14px}footer a{c
   var ME=null,POP=['Japan','South Korea','Hong Kong','Taiwan','Thailand','Singapore','Vietnam','Europe','USA','Global'];
   var FLAG={'Japan':'🇯🇵','South Korea':'🇰🇷','Hong Kong':'🇭🇰','Taiwan':'🇹🇼','Thailand':'🇹🇭','Singapore':'🇸🇬','Vietnam':'🇻🇳','Europe':'🇪🇺','USA':'🇺🇸','United States':'🇺🇸','Global':'🌍','Asia':'🌏','China':'🇨🇳','Australia':'🇦🇺','Canada':'🇨🇦','United Kingdom':'🇬🇧','Malaysia':'🇲🇾','Indonesia':'🇮🇩','United Arab Emirates':'🇦🇪','Saudi Arabia':'🇸🇦','Qatar':'🇶🇦','Italy':'🇮🇹','France':'🇫🇷','Spain':'🇪🇸','Germany':'🇩🇪','Switzerland':'🇨🇭','Turkey':'🇹🇷'};
   function destLink(d){return 'https://3ukph.com/r/'+ME.code+'?d='+encodeURIComponent(d)}
-  function copy(t,msg){(navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(function(){toast(msg||'Copied!')}).catch(function(){prompt('Copy this:',t)})}
-  function share(t){if(navigator.share)navigator.share({text:t}).catch(function(){});else copy(t,'Copied! Paste it in your post.')}
+  function copy(t,msg){(navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(function(){toast(msg||'Copied')}).catch(function(){prompt('Copy this:',t)})}
+  function share(t){if(navigator.share)navigator.share({text:t}).catch(function(){});else copy(t,'Copied')}
   function pickPlans(list){
     var by=function(f){return list.filter(f).sort(function(a,b){return a.pricePHP-b.pricePHP})[0]};
     var out=[],seen={},add=function(p){if(p&&!seen[p.planId]){seen[p.planId]=1;out.push(p)}};
@@ -286,11 +318,11 @@ footer{background:#00166a;color:#dfe4f5;padding:28px 0;font-size:14px}footer a{c
       if(!j.found||!j.plans||!j.plans.length){$('destOut').innerHTML='<p class="sub">No plans found for "'+esc(d)+'". Try the country name in English, or a region like Europe, Asia or Global.</p>';return}
       var name=(j.matchedDestinations&&j.matchedDestinations[0])||d,ps=pickPlans(j.plans),cap=destCaption(name,ps);
       $('destOut').innerHTML='<p class="sub" style="margin:8px 0 0"><b>'+esc(name)+'</b>: '+j.totalPlansForDestination+' plans. Popular picks:</p>'+
-        '<div class="plans">'+ps.map(function(p,i){return '<div class="pl"><div><b>'+esc(line(p).split(': ')[0])+'</b><br><small style="color:var(--muted)">'+esc(p.name)+'</small></div><div class="pr">'+esc(p.price)+'</div><div class="acts"><button class="btn ghost small" data-pc="'+i+'">Copy short post</button></div></div>'}).join('')+'</div>'+
+        '<div class="plans">'+ps.map(function(p,i){return '<div class="pl"><div><b>'+esc(line(p).split(': ')[0])+'</b><br><small style="color:var(--muted)">'+esc(p.name)+'</small></div><div class="pr">'+esc(p.price)+'</div><div class="acts"><button class="linkbtn" data-pc="'+i+'">Copy short post</button></div></div>'}).join('')+'</div>'+
         '<h3 style="font-size:16px;margin-top:18px">Ready-to-post caption</h3><div class="cap" id="capTxt">'+esc(cap)+'</div>'+
         '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"><button class="btn accent small" id="capCopy">Copy caption</button><button class="btn ghost small" id="capShare">Share…</button><button class="btn ghost small" id="lnkCopy">Copy link only</button></div>';
       $('destOut').querySelectorAll('[data-pc]').forEach(function(b){b.onclick=function(){copy(planCaption(name,ps[+b.getAttribute('data-pc')]))}});
-      $('capCopy').onclick=function(){copy(cap,'Caption copied! Paste it in your post.')};$('capShare').onclick=function(){share(cap)};$('lnkCopy').onclick=function(){copy(destLink(name))};
+      $('capCopy').onclick=function(){copy(cap,'Caption copied')};$('capShare').onclick=function(){share(cap)};$('lnkCopy').onclick=function(){copy(destLink(name))};
     }).catch(function(){$('destOut').innerHTML='<p class="err">Couldn\'t load plans. Please try again.</p>'});
   }
   function initShare(p){
@@ -307,7 +339,7 @@ footer{background:#00166a;color:#dfe4f5;padding:28px 0;font-size:14px}footer a{c
     var b={name:f.name.value,email:f.email.value,mobile:f.mobile.value,payoutMethod:f.payoutMethod.value,payoutNumber:f.payoutNumber.value,payoutName:f.payoutName.value,how:f.how.value,agree:f.agree.checked,website:f.website.value};
     var m=!b.name.trim()?'Please enter your full name.':!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(b.email.trim())?'Please enter a valid email address.':b.mobile.replace(/\D/g,'').length<10?'Please enter your mobile / WhatsApp number.':!b.agree?'Please accept the affiliate terms.':'';
     if(m)return err('suErr',m);err('suErr','');$('suBtn').disabled=true;$('suBtn').textContent='Creating your link…';
-    call('/api/affiliate/signup',b).then(function(j){setToken(j.token);return loadDash().then(function(){toast('Welcome! Your links are ready.')})})
+    call('/api/affiliate/signup',b).then(function(j){setToken(j.token);return loadDash().then(function(){toast('Your links are ready')})})
       .catch(function(e){err('suErr',e.message);if(e.data&&e.data.signIn){$('lgForm').elements.email.value=b.email;}})
       .then(function(){$('suBtn').disabled=false;$('suBtn').textContent='Get my link'})};
 
