@@ -58,6 +58,12 @@ footer{background:#00166a;color:#dfe4f5;padding:28px 0;font-size:14px}footer a{c
 .dchip[aria-pressed="true"]{background:var(--blue);border-color:var(--blue);color:var(--on-blue)}
 .plans{display:grid;gap:10px;margin-top:12px}.pl{display:grid;grid-template-columns:1fr auto;gap:8px 12px;align-items:center;background:var(--raised);border-radius:var(--r);padding:12px 14px}
 .pl b{font-size:15px}.pl .pr{font:600 18px/24px var(--font);color:var(--navy);font-variant-numeric:tabular-nums}@media (prefers-color-scheme: dark){.pl .pr{color:var(--gold-l)}}.pl .acts{grid-column:1/-1;display:flex;gap:16px;flex-wrap:wrap}
+.kita{display:block;font:500 12px/16px var(--font);color:var(--muted);text-align:right}
+.linkbtn[aria-pressed="true"]{color:var(--ok)}
+.allp{margin-top:20px;border-top:1px solid var(--hair);padding-top:14px}.allp summary{cursor:pointer;font:600 16px/24px var(--font);color:var(--blue)}
+.filters{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px;align-items:end}.fsel{display:grid;gap:4px;font:500 12px/16px var(--font);color:var(--muted)}.fsel select{width:auto;min-height:40px;font:400 14px/20px var(--font);padding:7px 10px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--ink);max-width:220px}
+.fchk input{width:18px;height:18px;min-height:0}.fchk{display:flex;gap:6px;align-items:center;font:500 14px/20px var(--font);padding-bottom:8px}
+.dgrid{max-height:320px;overflow-y:auto;padding:2px}
 .cap{white-space:pre-wrap;background:var(--raised);border-radius:var(--r);padding:14px;font-size:14px;line-height:21px;margin-top:12px}
 .pass{display:grid;grid-template-columns:1fr auto;background:var(--surface);border:1px solid var(--hair);border-radius:14px;position:relative;overflow:hidden}
 .pass .main{padding:16px 20px}.pass .stub{padding:16px 20px;border-left:1px dashed var(--border);display:flex;flex-direction:column;justify-content:center;text-align:right;min-width:112px}
@@ -228,13 +234,15 @@ footer{background:#00166a;color:#dfe4f5;padding:28px 0;font-size:14px}footer a{c
   <div class="card" style="margin-top:28px" id="sharePlan">
     <span class="label">Share a plan</span>
     <h2 style="font-size:20px;margin-top:4px">Find an eSIM to post</h2>
-    <p class="sub">Pick a destination. You'll get a ready-to-post caption with real prices and your own link, which opens 3ukph.com on that destination. Prices update automatically, so re-copy before posting.</p>
+    <p class="sub">Pick any destination, or browse them all. See every plan with filters, pick the ones you want in your caption, and see how much you earn on each. You'll get a ready-to-post caption with real prices and your own link, which opens 3ukph.com on that destination. Prices update automatically, so re-copy before posting.</p>
     <div class="row2" style="grid-template-columns:1fr auto">
       <input id="destIn" list="destList" placeholder="Type a country or region, e.g. Japan, Europe" maxlength="40">
       <button class="btn primary small" id="destGo">Show plans</button>
     </div>
     <datalist id="destList"></datalist>
     <div class="dchips" id="dchips"></div>
+    <a href="#" id="browseAll" class="hidden" style="font:600 14px/20px var(--font)">Browse all destinations</a>
+    <div id="allDest" class="hidden" style="margin-top:10px"><input id="dfind" placeholder="Filter, e.g. Ital, Asia, Caribbean" maxlength="40"><div class="dchips dgrid" id="dgrid"></div></div>
     <div id="destOut"></div>
     <p class="sub" style="margin:14px 0 0">Want to browse everything? <a href="#" id="openSite" target="_blank" rel="noopener">Open 3ukph.com with your link</a></p>
   </div>
@@ -310,26 +318,72 @@ footer{background:#00166a;color:#dfe4f5;padding:28px 0;font-size:14px}footer a{c
     return f+' Papuntang '+d+'? May data ka na agad pagdating! 📶\n\n'+ps.slice(0,5).map(function(p){return '• '+line(p)}).join('\n')+
       '\n\n✅ Walang roaming charges, walang pila sa airport para sa SIM\n✅ I-install bago umalis, i-on pagdating\n✅ Bayad via GCash, Maya o bank, QR in minutes\n\n👉 Order dito: '+L+'\n(o i-type ang '+ME.code+' pag nag-message ka sa 3UK)'}
   function planCaption(d,p){var f=FLAG[d]||'✈️';return f+' '+d+' eSIM: '+line(p)+'\n\nData agad pagdating, walang roaming! 📶 Order dito: '+destLink(d)+'\n(code: '+ME.code+')'}
+  var CUR=null,SEL=[],FIL={data:'any',days:'any',scope:'all',calls:false,sort:'price'},SHOWN=12,ALLDEST=[];
+  function earn(p){return Math.round(p.pricePHP*(ME&&ME.pct!=null?ME.pct:5))/100}
+  function gb(p){return p.unlimitedData?1e6:(parseFloat(p.data)||0)*(/MB/i.test(p.data)?0.001:1)}
+  function curCaption(){var ps=SEL.length?CUR.plans.filter(function(p){return SEL.indexOf(p.planId)>=0}):CUR.picks.slice(0,5);return destCaption(CUR.name,ps)}
+  function planRow(p){var on=SEL.indexOf(p.planId)>=0;
+    return '<div class="pl"><div><b>'+esc(line(p).split(': ')[0])+'</b><br><small style="color:var(--muted)">'+esc(p.name)+(p.scope&&p.scope!=='country'?' · '+esc(p.coverage||'multi-country'):'')+'</small></div><div class="pr">'+esc(p.price)+'<small class="kita">Kita mo: '+peso(earn(p))+'</small></div>'+
+      '<div class="acts"><button class="linkbtn" data-post="'+p.planId+'">Copy short post</button><button class="linkbtn" data-sel="'+p.planId+'" aria-pressed="'+on+'">'+(on?'✓ Nasa caption':'+ Add to caption')+'</button></div></div>'}
+  function filtered(){var L=CUR.plans.filter(function(p){
+      var g=gb(p),d=p.validityDays;
+      if(FIL.data==='unl'){if(!p.unlimitedData)return false}else if(FIL.data!=='any'&&(p.unlimitedData||g<+FIL.data))return false;
+      if(FIL.days==='7'&&d>7)return false;if(FIL.days==='15'&&(d<8||d>15))return false;if(FIL.days==='30'&&(d<16||d>30))return false;if(FIL.days==='31'&&d<31)return false;
+      if(FIL.scope==='country'&&p.scope!=='country')return false;if(FIL.scope==='multi'&&p.scope==='country')return false;
+      if(FIL.calls&&!p.callsAndTexts)return false;return true});
+    var s={price:function(a,b){return a.pricePHP-b.pricePHP},data:function(a,b){return gb(b)-gb(a)||a.pricePHP-b.pricePHP},days:function(a,b){return b.validityDays-a.validityDays||a.pricePHP-b.pricePHP}}[FIL.sort];
+    return L.sort(s)}
+  function bindRows(box){
+    box.querySelectorAll('[data-post]').forEach(function(b){b.onclick=function(){var p=CUR.plans.filter(function(x){return x.planId===b.getAttribute('data-post')})[0];if(p)copy(planCaption(CUR.name,p),'Post copied')}});
+    box.querySelectorAll('[data-sel]').forEach(function(b){b.onclick=function(){var id=b.getAttribute('data-sel'),i=SEL.indexOf(id);
+      if(i>=0)SEL.splice(i,1);else{if(SEL.length>=8)return toast('Hanggang 8 plans lang sa isang caption');SEL.push(id)}
+      document.querySelectorAll('[data-sel="'+id+'"]').forEach(function(x){var on=SEL.indexOf(id)>=0;x.setAttribute('aria-pressed',on);x.textContent=on?'✓ Nasa caption':'+ Add to caption'});
+      updCap()}})}
+  function updCap(){$('capTxt').textContent=curCaption();$('capNote').textContent=SEL.length?SEL.length+' plan'+(SEL.length>1?'s':'')+' na pinili mo':'Top 5 popular picks (pumili sa listahan para palitan)';$('capClear').classList.toggle('hidden',!SEL.length)}
+  function renderAll(){var L=filtered(),box=$('allList');
+    $('allCount').textContent=L.length+' of '+CUR.plans.length+' plans';
+    box.innerHTML=L.length?L.slice(0,SHOWN).map(planRow).join(''):'<p class="sub">Walang plan na tugma sa filter. Subukang luwagan ang filter.</p>';
+    $('allMore').classList.toggle('hidden',L.length<=SHOWN);$('allMore').textContent='Show more ('+(L.length-SHOWN)+' pa)';bindRows(box)}
+  function sel(id,label,opts){return '<label class="fsel"><span>'+label+'</span><select id="'+id+'">'+opts.map(function(o){return '<option value="'+o[0]+'">'+o[1]+'</option>'}).join('')+'</select></label>'}
   function showDest(d){
-    d=String(d||'').trim();if(!d)return;$('destIn').value=d;
+    d=String(d||'').trim();if(!d)return;$('destIn').value=d;$('allDest').classList.add('hidden');
     document.querySelectorAll('.dchip').forEach(function(c){c.setAttribute('aria-pressed',c.textContent.indexOf(d)>=0)});
     $('destOut').innerHTML='<p class="sub">Loading plans…</p>';
     fetch('/api/plans?destination='+encodeURIComponent(d)).then(function(r){return r.json()}).then(function(j){
       if(!j.found||!j.plans||!j.plans.length){$('destOut').innerHTML='<p class="sub">No plans found for "'+esc(d)+'". Try the country name in English, or a region like Europe, Asia or Global.</p>';return}
-      var name=(j.matchedDestinations&&j.matchedDestinations[0])||d,ps=pickPlans(j.plans),cap=destCaption(name,ps);
-      $('destOut').innerHTML='<p class="sub" style="margin:8px 0 0"><b>'+esc(name)+'</b>: '+j.totalPlansForDestination+' plans. Popular picks:</p>'+
-        '<div class="plans">'+ps.map(function(p,i){return '<div class="pl"><div><b>'+esc(line(p).split(': ')[0])+'</b><br><small style="color:var(--muted)">'+esc(p.name)+'</small></div><div class="pr">'+esc(p.price)+'</div><div class="acts"><button class="linkbtn" data-pc="'+i+'">Copy short post</button></div></div>'}).join('')+'</div>'+
-        '<h3 style="font-size:16px;margin-top:18px">Ready-to-post caption</h3><div class="cap" id="capTxt">'+esc(cap)+'</div>'+
-        '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"><button class="btn accent small" id="capCopy">Copy caption</button><button class="btn ghost small" id="capShare">Share…</button><button class="btn ghost small" id="lnkCopy">Copy link only</button></div>';
-      $('destOut').querySelectorAll('[data-pc]').forEach(function(b){b.onclick=function(){copy(planCaption(name,ps[+b.getAttribute('data-pc')]))}});
-      $('capCopy').onclick=function(){copy(cap,'Caption copied')};$('capShare').onclick=function(){share(cap)};$('lnkCopy').onclick=function(){copy(destLink(name))};
+      var name=(j.matchedDestinations&&j.matchedDestinations[0])||d;
+      CUR={name:name,plans:j.plans,picks:pickPlans(j.plans)};SEL=[];SHOWN=12;FIL={data:'any',days:'any',scope:'all',calls:false,sort:'price'};
+      var hasMulti=j.plans.some(function(p){return p.scope&&p.scope!=='country'})&&j.plans.some(function(p){return p.scope==='country'}),hasCalls=j.plans.some(function(p){return p.callsAndTexts});
+      $('destOut').innerHTML='<p class="sub" style="margin:8px 0 0"><b>'+esc(name)+'</b>: '+j.plans.length+' plans. Popular picks:</p>'+
+        '<div class="plans" id="pickList">'+CUR.picks.map(planRow).join('')+'</div>'+
+        '<h3 style="font-size:16px;margin-top:18px">Ready-to-post caption</h3><p class="sub" style="margin:2px 0 0"><span id="capNote"></span> <a href="#" id="capClear" class="hidden">Reset</a></p><div class="cap" id="capTxt"></div>'+
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"><button class="btn accent small" id="capCopy">Copy caption</button><button class="btn ghost small" id="capShare">Share…</button><button class="btn ghost small" id="lnkCopy">Copy link only</button></div>'+
+        '<details class="allp" id="allWrap"><summary>See all '+j.plans.length+' '+esc(name)+' plans</summary>'+
+        '<div class="filters">'+sel('fData','Data',[['any','Any'],['1','1GB+'],['3','3GB+'],['5','5GB+'],['10','10GB+'],['20','20GB+'],['50','50GB+'],['unl','Unlimited']])+
+        sel('fDays','Days',[['any','Any'],['7','1–7 days'],['15','8–15 days'],['30','16–30 days'],['31','More than 30']])+
+        (hasMulti?sel('fScope','Coverage',[['all','All'],['country',esc(name)+' only'],['multi','Regional / multi-country']]):'')+
+        sel('fSort','Sort',[['price','Cheapest first'],['data','Most data'],['days','Longest validity']])+
+        (hasCalls?'<label class="fchk"><input type="checkbox" id="fCalls"> With calls & texts</label>':'')+'</div>'+
+        '<p class="sub" id="allCount" style="margin:8px 0 0"></p><div class="plans" id="allList"></div><button class="btn ghost small hidden" id="allMore" style="margin-top:10px">Show more</button></details>';
+      bindRows($('pickList'));updCap();
+      $('capCopy').onclick=function(){copy(curCaption(),'Caption copied')};$('capShare').onclick=function(){share(curCaption())};$('lnkCopy').onclick=function(){copy(destLink(name))};
+      $('capClear').onclick=function(e){e.preventDefault();var old=SEL.slice();SEL=[];old.forEach(function(id){document.querySelectorAll('[data-sel="'+id+'"]').forEach(function(x){x.setAttribute('aria-pressed','false');x.textContent='+ Add to caption'})});updCap()};
+      var onF=function(){FIL.data=$('fData').value;FIL.days=$('fDays').value;FIL.scope=$('fScope')?$('fScope').value:'all';FIL.sort=$('fSort').value;FIL.calls=$('fCalls')?$('fCalls').checked:false;SHOWN=12;renderAll()};
+      ['fData','fDays','fScope','fSort','fCalls'].forEach(function(id){if($(id))$(id).onchange=onF});
+      $('allMore').onclick=function(){SHOWN+=12;renderAll()};
+      $('allWrap').addEventListener('toggle',function(){if(this.open&&!$('allList').children.length)renderAll()});
     }).catch(function(){$('destOut').innerHTML='<p class="err">Couldn\'t load plans. Please try again.</p>'});
   }
+  function renderDestGrid(q){q=String(q||'').toLowerCase();var L=ALLDEST.filter(function(x){return !q||x.toLowerCase().indexOf(q)>=0});
+    $('dgrid').innerHTML=L.length?L.map(function(x){return '<button type="button" class="dchip" data-d="'+esc(x)+'">'+(FLAG[x]?FLAG[x]+' ':'')+esc(x)+'</button>'}).join(''):'<p class="sub">Walang tugma.</p>';
+    $('dgrid').querySelectorAll('[data-d]').forEach(function(b){b.onclick=function(){showDest(b.getAttribute('data-d'));$('destIn').scrollIntoView({behavior:'smooth',block:'center'})}})}
   function initShare(p){
     ME=p;$('openSite').href=p.links.website;
     if(!$('dchips').children.length){$('dchips').innerHTML=POP.map(function(d){return '<button type="button" class="dchip" aria-pressed="false">'+(FLAG[d]||'')+' '+esc(d)+'</button>'}).join('');
       $('dchips').querySelectorAll('.dchip').forEach(function(c,i){c.onclick=function(){showDest(POP[i])}});
-      fetch('/api/destinations').then(function(r){return r.json()}).then(function(l){$('destList').innerHTML=(l||[]).map(function(x){return '<option value="'+esc(x)+'">'}).join('')}).catch(function(){});}
+      fetch('/api/destinations').then(function(r){return r.json()}).then(function(l){ALLDEST=(l||[]).slice().sort();$('destList').innerHTML=ALLDEST.map(function(x){return '<option value="'+esc(x)+'">'}).join('');$('browseAll').textContent='Browse all '+ALLDEST.length+' destinations';$('browseAll').classList.remove('hidden')}).catch(function(){});}
+    $('browseAll').onclick=function(e){e.preventDefault();var o=$('allDest').classList.toggle('hidden');if(!o){$('dfind').value='';renderDestGrid('');$('dfind').focus()}};
+    $('dfind').oninput=function(){renderDestGrid(this.value)};
     $('destGo').onclick=function(){showDest($('destIn').value)};
     $('destIn').onkeydown=function(e){if(e.key==='Enter'){e.preventDefault();showDest(this.value)}};
   }
